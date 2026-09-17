@@ -112,3 +112,15 @@ test('toICS: 기한 있는 과제만 VEVENT로 나가고 알람이 붙는다', (
   // 모든 줄이 CRLF로 끝나고 75옥텟 제한을 넘지 않아야 한다.
   assert.ok(ics.split('\r\n').every((line) => line.length <= 75));
 });
+
+test('기본 설정: 중앙대 e-Class로 바로 쓸 수 있게 고정되어 있다', async () => {
+  const { DEFAULT_SETTINGS } = await import('../src/lib/storage.js');
+  const manifest = JSON.parse(await (await import('node:fs/promises')).readFile('manifest.json', 'utf8'));
+
+  assert.equal(DEFAULT_SETTINGS.origin, 'https://eclass3.cau.ac.kr');
+  // 기본 주소가 manifest의 host_permissions에 없으면 설치 직후 조용히 실패한다.
+  assert.ok(
+    manifest.host_permissions.some((p) => p.startsWith(`${DEFAULT_SETTINGS.origin}/`)),
+    '기본 origin은 manifest host_permissions에 선언되어 있어야 한다'
+  );
+});

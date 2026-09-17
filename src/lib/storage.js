@@ -1,7 +1,9 @@
 // chrome.storage 래퍼 + 기본 설정값.
 
 export const DEFAULT_SETTINGS = {
-  origin: '',                 // 예: https://lms.myuniv.ac.kr  (옵션 화면에서 입력)
+  // 중앙대 e-Class. manifest의 host_permissions에도 같은 도메인이 선언돼 있어서
+  // 설치 직후 별도 설정 없이 바로 동작한다.
+  origin: 'https://eclass3.cau.ac.kr',
   adapter: 'auto',            // auto | canvas | learningx | custom | html
   lookAheadDays: 60,
   lookBackDays: 14,

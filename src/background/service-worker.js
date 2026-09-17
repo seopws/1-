@@ -11,8 +11,15 @@ const ALARM_NOTIFY = 'notify';
 
 chrome.runtime.onInstalled.addListener(async () => {
   await rescheduleAlarms();
+
+  // 기본값(중앙대 e-Class)이 이미 들어 있으므로 설정 화면을 띄우지 않고 바로 한 번 긁어온다.
+  // e-Class에 로그인이 안 돼 있으면 lastError에 안내가 남고 팝업에 표시된다.
   const { origin } = await getSettings();
-  if (!origin) chrome.runtime.openOptionsPage();
+  if (!origin) {
+    chrome.runtime.openOptionsPage();
+    return;
+  }
+  await sync({ reason: 'install' }).catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(rescheduleAlarms);

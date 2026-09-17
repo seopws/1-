@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "과제 한눈에 — LearningX Deadline Board",
+  "name": "과제 한눈에 — 중앙대 e-Class",
   "version": "0.1.0",
-  "description": "여러 과목에 흩어진 LearningX 과제 마감일을 한 화면에 모아 D-day 순으로 보여줍니다.",
+  "description": "중앙대 e-Class의 모든 과목 과제 마감일을 한 화면에 D-day 순으로 모아 보여줍니다.",
   "default_locale": "ko",
   "permissions": [
     "storage",
@@ -11,7 +11,12 @@
     "scripting",
     "offscreen"
   ],
-  "optional_host_permissions": ["*://*/*"],
+  "host_permissions": [
+    "https://eclass3.cau.ac.kr/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
@@ -28,8 +33,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["src/content/capture-main.js"],
-      "matches": ["*://*/*"]
+      "resources": [
+        "src/content/capture-main.js"
+      ],
+      "matches": [
+        "*://*/*"
+      ]
     }
   ]
 }

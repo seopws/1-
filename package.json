@@ -5,6 +5,10 @@
   "type": "module",
   "description": "LearningX 과제 마감일을 한 화면에 모아주는 크롬 확장 프로그램",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build:bookmarklet": "node bookmarklet/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

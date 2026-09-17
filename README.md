@@ -68,6 +68,36 @@ e-Class는 Canvas LMS 기반(`/courses/123/pages/...`, `/learningx/...`)이라 `
 
 <br>
 
+## 아이패드 · 아이폰 (북마클릿)
+
+iOS·iPadOS의 크롬과 사파리에는 **확장 프로그램을 설치할 수 없습니다.** 애플이 막아둔 것이라 우회 방법이 없습니다.
+대신 같은 일을 하는 **북마클릿**을 같이 넣어뒀습니다.
+
+`bookmarklet/dist/install.html` 을 열어 코드를 복사한 뒤, 사파리 북마크 하나의 **주소**를 그것으로 바꾸면 됩니다.
+e-Class에 로그인한 상태로 그 북마크를 누르면 과제 목록이 화면 위로 올라옵니다.
+
+- 확장과 **같은 어댑터·날짜 계산·ics 생성 코드**를 그대로 번들해서 씁니다. 결과가 갈릴 일이 없습니다.
+- 페이지 안에서 실행되므로 로그인 세션을 그대로 빌려 씁니다. 여기서도 비밀번호는 쓰지 않습니다.
+- 자동 새로고침과 마감 알림은 없습니다(북마크를 눌러야 실행되므로). 대신 **.ics로 애플 캘린더에 넣어두면**
+  캘린더가 하루 전 알림을 대신 띄워줍니다.
+
+고친 뒤에는 반드시 다시 빌드해야 합니다.
+
+```bash
+npm install          # esbuild
+npm run build:bookmarklet
+```
+
+`bookmarklet/dist/` 에 세 개가 나옵니다.
+
+| 파일 | 용도 |
+|---|---|
+| `bookmarklet.txt` | 북마크 주소 칸에 붙여넣을 `javascript:` 문자열 (약 19KB) |
+| `install.html` | 복사 버튼과 설치 절차가 담긴 페이지. 아이패드에서 이걸 열면 편합니다 |
+| `bookmarklet.js` | 디버깅용 번들 원본 |
+
+<br>
+
 ## 구조
 
 ```
@@ -95,7 +125,13 @@ src/
   popup/                    툴바 팝업 (임박순 / 오늘·내일 / 전체)
   dashboard/                전체 화면 보드 (통계, 필터, 검색, ics 내보내기)
   options/                  설정 + 엔드포인트 탐색 UI
-docs/DISCOVERY.md           우리 학교 엔드포인트 찾는 법
+bookmarklet/
+  src/main.js               아이패드용 오버레이 UI (확장의 어댑터를 그대로 import)
+  src/install.template.html 설치 페이지 템플릿
+  build.mjs                 esbuild 번들 → javascript: URL → install.html 생성
+  dist/                     빌드 산출물 (커밋됨)
+tests/                      날짜·정렬·어댑터 테스트
+docs/DISCOVERY.md           e-Class 엔드포인트 찾는 법
 ```
 
 ### 어댑터 인터페이스
@@ -126,3 +162,5 @@ export const myAdapter = {
   **후보를 순서대로 시도**하고 실패하면 조용히 건너뜁니다. Canvas 표준 API만으로도 과제는 다 나옵니다.
   더 정확히 맞추고 싶으면 탐색 기능으로 실제 경로를 확인하세요.
 - 과제를 **가져오기만** 합니다. 제출하거나 수정하는 기능은 없습니다.
+- 확장과 북마클릿은 **서로 동기화되지 않습니다.** 각자 e-Class에서 직접 읽어오므로 결과는 같지만,
+  필터 설정 같은 건 기기별로 따로 놉니다.

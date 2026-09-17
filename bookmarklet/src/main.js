@@ -11,6 +11,9 @@ import { dedupe, sortByDue, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL } from '../.
 import { toICS } from '../../src/lib/ics.js';
 
 const HOST_ID = 'gwaje-hannune-root';
+const ECLASS_URL = 'https://eclass3.cau.ac.kr/';
+// 서브도메인 경계를 지켜서 검사한다. /cau\.ac\.kr$/ 만 쓰면 evilcau.ac.kr 도 통과한다.
+const ON_ECLASS = /(^|\.)cau\.ac\.kr$/;
 const LOOK_AHEAD_DAYS = 60;
 const LOOK_BACK_DAYS = 14;
 
@@ -107,6 +110,11 @@ footer button { flex: 1; }
 
 .msg { padding: 44px 24px; text-align: center; color: #667085; font-size: 14px; line-height: 1.7; }
 .msg strong { color: #101828; display: block; margin-bottom: 6px; font-size: 15px; }
+.msg .cta {
+  display: inline-block; margin-top: 16px; padding: 11px 20px; min-height: 44px; line-height: 22px;
+  background: #3538cd; color: #fff; border-radius: 9px; font-size: 14px; font-weight: 600;
+  text-decoration: none; -webkit-tap-highlight-color: transparent;
+}
 .spin { display: inline-block; width: 22px; height: 22px; border: 2.5px solid #e4e7ec; border-top-color: #3538cd; border-radius: 50%; animation: sp 0.7s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 
@@ -119,6 +127,7 @@ footer button { flex: 1; }
   .glabel, .stat .k, .row .m, .toggle, .msg { color: #98a2b3; }
   .glabel .n, .tag { background: #24282e; color: #98a2b3; }
   .msg strong { color: #e7eaee; }
+  .msg .cta { background: #a4bcfd; color: #14161a; }
   .dday.overdue { color: #fda29b; background: #3a1c19; }
   .dday.urgent  { color: #fdb894; background: #3a2318; }
   .dday.soon    { color: #fdd87d; background: #382e14; }
@@ -202,11 +211,19 @@ class Board {
     delete window.__gwajeBoard;
   }
 
-  showMessage(titleText, detail) {
+  showMessage(titleText, detail, action) {
     this.body.textContent = '';
     const box = el('div', 'msg');
     box.append(el('strong', null, titleText));
     box.append(document.createTextNode(detail));
+
+    // 막힌 곳에서 끝내지 않고 다음 행동을 바로 누를 수 있게 한다.
+    if (action) {
+      const link = el('a', 'cta', action.label);
+      link.href = action.href;
+      box.append(link);
+    }
+
     this.body.append(box);
   }
 
@@ -244,10 +261,23 @@ class Board {
       this.status.textContent = '가져오지 못했습니다';
       const message = String(err?.message || err);
 
+      const openEclass = { label: 'e-Class 열기', href: ECLASS_URL };
+
       if (err?.name === 'NotLoggedInError' || /로그인/.test(message)) {
-        this.showMessage('e-Class 로그인이 필요합니다', 'e-Class에 로그인한 다음, 강의실 화면에서 다시 북마크를 눌러주세요.');
-      } else if (!/cau\.ac\.kr$/.test(location.hostname)) {
-        this.showMessage('e-Class 페이지에서 눌러주세요', `지금 페이지(${location.hostname})에서는 과제를 가져올 수 없습니다. eclass3.cau.ac.kr 을 연 뒤 북마크를 다시 눌러주세요.`);
+        this.showMessage(
+          'e-Class 로그인이 필요합니다',
+          '로그인한 다음 이 북마크를 다시 눌러주세요.',
+          openEclass
+        );
+      } else if (!ON_ECLASS.test(location.hostname)) {
+        // 사파리 시작 페이지처럼 주소가 없는 화면이면 hostname이 빈 문자열이다.
+        this.showMessage(
+          'e-Class 화면에서 눌러주세요',
+          location.hostname
+            ? `지금 보고 있는 ${location.hostname} 에서는 과제를 가져올 수 없습니다. 북마클릿은 열려 있는 페이지 안에서 실행되기 때문입니다.`
+            : '지금은 e-Class가 아닌 화면입니다(사파리 시작 페이지 등). 북마클릿은 열려 있는 페이지 안에서 실행되기 때문에, e-Class 탭으로 옮긴 뒤 눌러야 합니다.',
+          openEclass
+        );
       } else {
         this.showMessage('과제를 가져오지 못했습니다', message);
       }

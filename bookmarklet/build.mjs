@@ -70,7 +70,11 @@ const bookmarklet = toBookmarkletUrl(`(function(){${code}})();`);
 // SHA 고정은 캐시도 영구적이라 오히려 유리하다.
 const { execFileSync } = await import('node:child_process');
 
+// 새 번들을 커밋하기 전에는 가리킬 SHA가 없다. 1단계 빌드용 탈출구.
+const skipLoader = process.argv.includes('--no-loader');
+
 const ref = (() => {
+  if (skipLoader) return null;
   const i = process.argv.indexOf('--ref');
   if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
   try {
@@ -141,7 +145,11 @@ await writeFile(
 
 const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
 console.log(`번들 ${kb(code.length)} → 전체 북마클릿 ${kb(bookmarklet.length)}`);
-console.log(loader ? `로더 ${loader.length}자 (${ref}) → dist/loader.txt` : '로더 없음 — 전체 버전만 생성');
+console.log(
+  loader
+    ? `로더 ${loader.length}자 (${ref}) → dist/loader.txt`
+    : '로더 건너뜀 — 번들을 커밋한 뒤 다시 빌드하세요'
+);
 console.log('설치 페이지 → dist/install.html');
 
 if (bookmarklet.length > 60000) {

@@ -6,7 +6,7 @@
 //
 // 어댑터·날짜 계산·ics 생성은 확장과 같은 모듈을 그대로 쓴다. 화면만 새로 그린다.
 
-import { learningxAdapter } from '../../src/adapters/learningx.js';
+import { learningxAdapter, extractArray } from '../../src/adapters/learningx.js';
 import { fetchCourses } from '../../src/adapters/canvas.js';
 import { getJSON, joinUrl, tryOr } from '../../src/lib/http.js';
 import {
@@ -15,6 +15,8 @@ import {
 import { toICS } from '../../src/lib/ics.js';
 
 const HOST_ID = 'gwaje-hannune-root';
+// 빌드가 커밋 SHA로 치환한다. 어느 버전이 돌고 있는지 진단에서 바로 보이게 하려는 것.
+const BUILD_REF = '__BUILD_REF__';
 const ECLASS_URL = 'https://eclass3.cau.ac.kr/';
 // 서브도메인 경계를 지켜서 검사한다. /cau\.ac\.kr$/ 만 쓰면 evilcau.ac.kr 도 통과한다.
 const ON_ECLASS = /(^|\.)cau\.ac\.kr$/;
@@ -155,17 +157,38 @@ footer button { flex: 1; }
 }
 `;
 
-/** 응답 어디에 배열이 들어있든 찾아낸다. 진단 표시용. */
-function pickArray(data) {
-  if (Array.isArray(data)) return data;
-  if (!data || typeof data !== 'object') return [];
-  for (const key of ['items', 'data', 'results', 'list', 'todo_items', 'activities', 'modules']) {
-    if (Array.isArray(data[key])) return data[key];
+/** Canvas modules 처럼 항목이 한 겹 안에 들어있는 응답을 펴준다. */
+function flatten(list) {
+  const out = [];
+  for (const entry of list) {
+    if (entry && Array.isArray(entry.items)) out.push(...entry.items);
+    else out.push(entry);
   }
-  for (const value of Object.values(data)) {
-    if (Array.isArray(value) && value.length) return value;
+  return out.length ? out : list;
+}
+
+const TITLE_KEYS = ['title', 'name', 'display_name', 'activity_name', 'subject'];
+
+function titleOf(item) {
+  if (!item || typeof item !== 'object') return '';
+
+  const type = item.type || item.component_type || item.activity_type || item.plannable_type || '';
+  for (const key of TITLE_KEYS) {
+    if (typeof item[key] === 'string' && item[key]) {
+      return type ? `${item[key]} (${type})` : item[key];
+    }
   }
-  return [data];
+
+  // planner 항목처럼 제목이 한 겹 안에 들어있는 경우.
+  for (const key of ['plannable', 'assignment', 'item', 'content']) {
+    const inner = item[key];
+    if (inner && typeof inner === 'object') {
+      const found = TITLE_KEYS.map((k) => inner[k]).find((v) => typeof v === 'string' && v);
+      if (found) return type ? `${found} (${type})` : found;
+    }
+  }
+
+  return '';
 }
 
 function el(tag, className, text) {
@@ -221,6 +244,7 @@ class Board {
     titleBox.style.flex = '1';
     this.title = el('h1', null, '과제 한눈에');
     this.status = el('span', 'sub', '불러오는 중…');
+    this.version = BUILD_REF; // 어느 버전이 도는지 진단 화면에서 확인용
     titleBox.append(this.title, this.status);
 
     const refresh = el('button', 'icon', '↻');
@@ -442,20 +466,34 @@ class Board {
         `/learningx/api/v1/courses/${courseId}/modules/items`,
         `/learningx/api/v1/courses/${courseId}/course_modules`,
         `/learningx/api/v1/courses/${courseId}/attendance/items`,
-        `/learningx/api/v1/courses/${courseId}/progress/commons`
+        `/learningx/api/v1/courses/${courseId}/attendance_items`,
+        `/learningx/api/v1/courses/${courseId}/progress`,
+        `/learningx/api/v1/courses/${courseId}/progress/commons`,
+        `/learningx/api/v1/courses/${courseId}/study_status`,
+        `/learningx/api/v1/courses/${courseId}/commons`
       );
     }
 
-    const lines = [`과목 ${courses ? courses.size : 0}개 · 기준 과목 ${courseId || '없음'}`];
+    const lines = [
+      `빌드 ${BUILD_REF} · 과목 ${courses ? courses.size : 0}개 · 기준 과목 ${courseId || '없음'}`,
+      '',
+    ];
     for (const path of paths) {
       const res = await tryOr(() => getJSON(joinUrl(origin, path)), null);
       if (!res) {
         lines.push(`✗ ${path}`);
         continue;
       }
-      const list = pickArray(res.data);
-      const keys = list.length && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 12) : [];
-      lines.push(`✓ ${path} — ${list.length}개${keys.length ? ` · ${keys.join(', ')}` : ''}`);
+      // 배열이 아니라 객체 하나만 돌려주는 엔드포인트(users/self 등)도 0개로 보이면 곤란하다.
+      const found = flatten(extractArray(res.data));
+      const list = found.length || !res.data || typeof res.data !== 'object' ? found : [res.data];
+      const keys = list.length && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 14) : [];
+      lines.push(`✓ ${path} — ${list.length}개`);
+      if (keys.length) lines.push(`    필드: ${keys.join(', ')}`);
+
+      // 제목이 있어야 "여기에 강의영상이 있나"를 눈으로 판단할 수 있다.
+      const titles = list.slice(0, 4).map(titleOf).filter(Boolean);
+      if (titles.length) lines.push(`    예: ${titles.join(' | ')}`);
     }
 
     this.renderProbe(lines.join('\n'));

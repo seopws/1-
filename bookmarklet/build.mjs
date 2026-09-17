@@ -3,6 +3,8 @@ import { build } from 'esbuild';
 import { writeFile, mkdir } from 'node:fs/promises';
 
 const REPO = 'seopws/1-';
+
+const { execFileSync: exec } = await import('node:child_process');
 const OUT_DIR = new URL('./dist/', import.meta.url);
 await mkdir(OUT_DIR, { recursive: true });
 
@@ -41,7 +43,16 @@ const result = await build({
   write: false,
 });
 
-const code = result.outputFiles[0].text.trim();
+// 번들 내용의 해시를 버전 표시로 쓴다. 자리표시자를 포함한 상태로 해시를 내고
+// 그 자리에 채워 넣으므로 스스로 일관되고, 커밋 순서에 얽히지 않는다.
+const { createHash } = await import('node:crypto');
+const staged = result.outputFiles[0].text.trim();
+const buildRef = createHash('sha256').update(staged).digest('hex').slice(0, 8);
+const code = staged.replaceAll('__BUILD_REF__', buildRef);
+
+if (staged.includes('__BUILD_REF__') === false) {
+  console.warn('⚠ 번들에 __BUILD_REF__ 자리표시자가 없습니다. 진단에 버전이 안 찍힙니다.');
+}
 
 // javascript: URL에서 실제로 문제가 되는 문자만 인코딩한다.
 // 전부 encodeURIComponent 하면 한글 한 글자가 9바이트로 불어나 URL이 배로 길어진다.
@@ -159,7 +170,7 @@ await writeFile(
 );
 
 const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
-console.log(`번들 ${kb(code.length)} → 전체 북마클릿 ${kb(bookmarklet.length)}`);
+console.log(`번들 ${kb(code.length)} (빌드 ${buildRef}) → 전체 북마클릿 ${kb(bookmarklet.length)}`);
 console.log(
   loader
     ? `로더 ${loader.length}자 (${ref}) → dist/loader.txt`

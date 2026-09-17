@@ -56,7 +56,7 @@ const ARRAY_KEYS = ['items', 'data', 'results', 'list', 'todo_items', 'activitie
  * {result:{items:[…]}} 처럼 한 겹 더 감싸는 API가 흔해서 재귀로 내려간다.
  * 예전에는 한 단계만 봤고, 그 탓에 응답은 200인데 목록이 비는 일이 있었다.
  */
-function extractArray(data, depth = 0) {
+export function extractArray(data, depth = 0) {
   if (Array.isArray(data)) return data;
   if (!data || typeof data !== 'object' || depth > 3) return [];
 

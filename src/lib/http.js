@@ -35,9 +35,14 @@ export class HttpError extends Error {
   }
 }
 
+// 우리가 보낸 요청임을 표시한다. 북마클릿의 기록 기능이 자기 요청을 걸러내는 데 쓴다.
+// 동일 출처라 프리플라이트도 생기지 않는다.
+export const SELF_HEADER = 'X-Gwaje-Self';
+
 const DEFAULT_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'X-Requested-With': 'XMLHttpRequest',
+  [SELF_HEADER]: '1',
 };
 
 export async function getJSON(url, { signal, headers } = {}) {

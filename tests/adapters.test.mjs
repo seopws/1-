@@ -378,3 +378,41 @@ test('fetchCourseIndex: 학기 정보가 없으면 아무것도 거르지 않는
   assert.equal(index.names.size, 2, '못 가르겠으면 숨기지 말아야 한다');
   assert.equal(index.termName, '');
 });
+
+test('모듈 항목: 요구사항으로 영상과 과제를 가른다', async () => {
+  stubFetch({
+    '/api/v1/users/self': { id: 1, name: '학생' },
+    '/api/v1/courses': [{ id: 101, name: '운영체제' }],
+    '/api/v1/planner/items': [],
+    '/api/v1/users/self/todo': [],
+    '/api/v1/courses/101/assignments': [],
+    '/api/v1/courses/101/modules': [
+      {
+        id: 76,
+        name: '3주차',
+        items: [
+          // LTI로 제출받는 과제. ExternalTool 이라고 영상 취급하면 안 된다.
+          { id: 301, type: 'ExternalTool', title: '3주차 실습 제출', html_url: '/x/301',
+            completion_requirement: { type: 'must_submit', completed: false } },
+          // 봐야 하는 LTI = 영상
+          { id: 302, type: 'ExternalTool', title: '3주차 학습하기', html_url: '/x/302',
+            completion_requirement: { type: 'must_view', completed: false } },
+          // 제목이 분명하면 제목을 믿는다
+          { id: 303, type: 'ExternalTool', title: '3주차 강의자료', html_url: '/x/303',
+            completion_requirement: { type: 'must_view', completed: false } },
+          { id: 304, type: 'Page', title: '2주차 동영상 보충', html_url: '/x/304',
+            completion_requirement: { type: 'must_view', completed: true } },
+        ],
+      },
+    ],
+  });
+
+  const items = dedupe(await canvasAdapter.fetchAll(ORIGIN, { lookAheadDays: 60, lookBackDays: 14 }));
+  const byTitle = Object.fromEntries(items.map((a) => [a.title, a]));
+
+  assert.equal(byTitle['3주차 실습 제출'].type, 'assignment', 'must_submit 은 과제다');
+  assert.equal(byTitle['3주차 학습하기'].type, 'video', '봐야 하는 LTI는 영상으로 본다');
+  assert.equal(byTitle['3주차 강의자료'].type, 'material', '제목이 분명하면 제목이 이긴다');
+  assert.equal(byTitle['2주차 동영상 보충'].type, 'video');
+  assert.equal(byTitle['2주차 동영상 보충'].submitted, true);
+});

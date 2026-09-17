@@ -226,13 +226,26 @@ async function fromCourseAssignments(origin, courseNames, { signal }) {
 
 // 제목만으로 영상을 알아보는 규칙. LearningX는 영상을 LTI(ExternalTool)로 끼워 넣는 일이 많아
 // 타입만으로는 구분이 안 된다.
-const VIDEO_TITLE = /영상|동영상|시청|녹화|강의보기|vod|video|lecture|streaming/i;
+const VIDEO_TITLE = /영상|동영상|시청|녹화|강의보기|온라인강의|이러닝|vod|video|streaming/i;
+const MATERIAL_TITLE = /강의자료|강의노트|수업자료|참고자료|교재|슬라이드|ppt|pdf|공지/i;
 
 function typeFromModuleItem(item) {
   const type = String(item.type || '').toLowerCase();
   const title = String(item.title || '');
+  const requirement = String(item.completion_requirement?.type || '');
 
-  if (type === 'externaltool' || VIDEO_TITLE.test(title)) return 'video';
+  // 요구사항이 종류를 가장 잘 말해준다. ExternalTool 이라는 것만으로 영상이라 단정하면
+  // LTI로 제출받는 과제까지 영상이 된다.
+  if (requirement === 'must_submit' || requirement === 'must_contribute' || requirement === 'min_score') {
+    return 'assignment';
+  }
+
+  if (VIDEO_TITLE.test(title)) return 'video';
+  if (MATERIAL_TITLE.test(title)) return 'material';
+
+  // 봐야 하는 LTI 항목은 LearningX에서 대개 영상이다.
+  if (requirement === 'must_view' && type === 'externaltool') return 'video';
+
   if (type === 'page' || type === 'file' || type === 'attachment' || type === 'externalurl') {
     return 'material';
   }

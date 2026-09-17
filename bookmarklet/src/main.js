@@ -8,7 +8,9 @@
 
 import { learningxAdapter, extractArray } from '../../src/adapters/learningx.js';
 import { fetchCourses } from '../../src/adapters/canvas.js';
-import { getJSON, joinUrl, tryOr, NotJsonError, HttpError } from '../../src/lib/http.js';
+import {
+  getJSON, joinUrl, tryOr, NotJsonError, HttpError, SELF_HEADER,
+} from '../../src/lib/http.js';
 import {
   dedupe, sortByDue, sortByPosted, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL,
 } from '../../src/lib/model.js';
@@ -217,6 +219,140 @@ async function mapLimit(items, limit, run) {
 
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
+}
+
+// ── e-Class가 스스로 부르는 주소 기록 ─────────────────────────────────────
+//
+// LearningX 고유 경로는 학교·버전마다 달라서 찍어서 맞힐 수가 없다.
+// 그래서 페이지가 실제로 주고받는 요청 중 "날짜처럼 생긴 값이 든 JSON"만 골라 적어둔다.
+// 응답 복사본을 읽기만 하고 원래 흐름은 그대로 흘려보낸다. 기록은 이 탭의
+// sessionStorage 에만 남고, 탭을 닫으면 사라진다.
+
+const CAPTURE_KEY = 'gwaje.captured.v1';
+const CAPTURE_MAX = 40;
+const DATE_VALUE = /^\d{4}[-./]\d{1,2}[-./]\d{1,2}([T ]\d{1,2}:\d{2})?/;
+const DATE_KEY = /(due|end|close|deadline|start|open|expire|limit)[_-]?(at|date|time|dt)?$/i;
+
+function readCaptures() {
+  try {
+    return JSON.parse(sessionStorage.getItem(CAPTURE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function writeCaptures(list) {
+  try {
+    sessionStorage.setItem(CAPTURE_KEY, JSON.stringify(list.slice(0, CAPTURE_MAX)));
+  } catch {
+    // 용량이 차면 조용히 포기한다. 기록은 부가 기능이지 본체가 아니다.
+  }
+}
+
+/** 날짜처럼 생긴 값을 가진 키를 훑어 모으고, 대표 항목 하나를 집어온다. */
+function scanForDates(node, depth = 0, found = { fields: new Set(), sample: null, count: 0 }) {
+  if (node == null || depth > 5) return found;
+
+  if (Array.isArray(node)) {
+    if (!found.sample && node.length && typeof node[0] === 'object') {
+      found.sample = node[0];
+      found.count = node.length;
+    }
+    for (const child of node.slice(0, 5)) scanForDates(child, depth + 1, found);
+    return found;
+  }
+
+  if (typeof node !== 'object') return found;
+
+  for (const [key, value] of Object.entries(node)) {
+    if (typeof value === 'string' && value && (DATE_VALUE.test(value) || DATE_KEY.test(key))) {
+      if (DATE_VALUE.test(value)) found.fields.add(key);
+    }
+    scanForDates(value, depth + 1, found);
+  }
+  return found;
+}
+
+function recordCapture(url, method, text) {
+  if (!text || text.length > 3_000_000) return;
+
+  let json;
+  try {
+    json = JSON.parse(text.replace(/^\s*while\s*\(1\);?/, ''));
+  } catch {
+    return;
+  }
+
+  const found = scanForDates(json);
+  if (!found.fields.size) return; // 날짜가 없으면 마감일과 무관하다
+
+  let path;
+  try {
+    const parsed = new URL(url, location.href);
+    if (parsed.origin !== location.origin) return;
+    path = parsed.pathname;
+  } catch {
+    return;
+  }
+
+  const list = readCaptures();
+  const entry = {
+    path,
+    method: method || 'GET',
+    fields: [...found.fields].slice(0, 10),
+    keys: found.sample && typeof found.sample === 'object' ? Object.keys(found.sample).slice(0, 16) : [],
+    title: titleOf(found.sample) || '',
+    count: found.count,
+  };
+
+  writeCaptures([entry, ...list.filter((e) => e.path !== path)]);
+}
+
+function isSelfRequest(init, input) {
+  const headers = init?.headers ?? (input && typeof input !== 'string' ? input.headers : null);
+  if (!headers) return false;
+  if (typeof headers.get === 'function') return Boolean(headers.get(SELF_HEADER));
+  return Boolean(headers[SELF_HEADER]);
+}
+
+function installCapture() {
+  if (window.__gwajeCaptureOn) return;
+  window.__gwajeCaptureOn = true;
+
+  const originalFetch = window.fetch;
+  window.fetch = function (...args) {
+    const promise = originalFetch.apply(this, args);
+    try {
+      const input = args[0];
+      // 우리가 보낸 요청은 기록하지 않는다. 알고 싶은 건 e-Class가 스스로 부르는 주소다.
+      if (!isSelfRequest(args[1], input)) {
+        const url = typeof input === 'string' ? input : input?.url;
+        const method = (args[1]?.method || input?.method || 'GET').toUpperCase();
+        promise
+          .then((res) => res.clone().text())
+          .then((text) => recordCapture(url, method, text))
+          .catch(() => {});
+      }
+    } catch {}
+    return promise;
+  };
+
+  const open = XMLHttpRequest.prototype.open;
+  const send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this.__gwaje = { method, url };
+    return open.call(this, method, url, ...rest);
+  };
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener('load', () => {
+      try {
+        if (this.responseType === '' || this.responseType === 'text') {
+          recordCapture(this.__gwaje?.url, this.__gwaje?.method, this.responseText);
+        }
+      } catch {}
+    });
+    return send.apply(this, args);
+  };
 }
 
 /** 경로 하나를 찔러보고 사람이 읽을 줄을 돌려준다. 절대 예외를 던지지 않는다. */
@@ -568,10 +704,31 @@ class Board {
       return line;
     });
 
+    const captured = readCaptures();
+    const capturedLines = captured.length
+      ? [
+          '',
+          `── e-Class가 스스로 부른 주소 ${captured.length}개 ──`,
+          ...captured.flatMap((e) => {
+            const lines = [`· ${e.method} ${e.path}${e.count ? ` — ${e.count}개` : ''}`];
+            lines.push(`    날짜 필드: ${e.fields.join(', ')}`);
+            if (e.keys.length) lines.push(`    필드: ${e.keys.join(', ')}`);
+            if (e.title) lines.push(`    예: ${e.title}`);
+            return lines;
+          }),
+        ]
+      : [
+          '',
+          '── e-Class가 스스로 부른 주소: 아직 없음 ──',
+          '  이 창을 닫고 아무 과목의 "주차별 학습" 페이지를 연 뒤,',
+          '  북마크를 다시 눌러 여기로 오면 기록이 쌓입니다.',
+        ];
+
     return [
       `빌드 ${BUILD_REF} · 과목 ${courses.size}개 · 기준 과목 ${courseId || '없음'}`,
       '',
       ...results.flat(),
+      ...capturedLines,
     ].join('\n');
   }
 
@@ -760,6 +917,9 @@ class Board {
 }
 
 // 이미 떠 있으면 닫는다 (북마크를 토글처럼 쓸 수 있게).
+// 보드를 열든 닫든 기록은 켜둔다. 한 번 켜두면 이후 페이지 이동에서도 계속 모인다.
+installCapture();
+
 if (window.__gwajeBoard) {
   window.__gwajeBoard.close();
 } else {

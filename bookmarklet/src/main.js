@@ -8,7 +8,7 @@
 
 import { learningxAdapter, extractArray } from '../../src/adapters/learningx.js';
 import { fetchCourses } from '../../src/adapters/canvas.js';
-import { getJSON, joinUrl, tryOr } from '../../src/lib/http.js';
+import { getJSON, joinUrl, tryOr, NotJsonError, HttpError } from '../../src/lib/http.js';
 import {
   dedupe, sortByDue, sortByPosted, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL,
 } from '../../src/lib/model.js';
@@ -22,6 +22,8 @@ const ECLASS_URL = 'https://eclass3.cau.ac.kr/';
 const ON_ECLASS = /(^|\.)cau\.ac\.kr$/;
 const LOOK_AHEAD_DAYS = 60;
 const LOOK_BACK_DAYS = 14;
+const LOAD_TIMEOUT_MS = 45000;
+const PROBE_TIMEOUT_MS = 8000;
 
 const CSS = `
 :host { all: initial; }
@@ -191,6 +193,67 @@ function titleOf(item) {
   return '';
 }
 
+/**
+ * 응답이 없으면 영원히 기다리는 fetch는 화면을 멈춰 세운다.
+ * 취소 가능한 신호를 만들어 넘기고, 끝나면 타이머를 반드시 정리한다.
+ */
+function withTimeout(ms, run) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return Promise.resolve(run(controller.signal)).finally(() => clearTimeout(timer));
+}
+
+/** 한 번에 limit개씩만 돌린다. 19개를 동시에 던지면 서버가 싫어한다. */
+async function mapLimit(items, limit, run) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await run(items[i], i);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** 경로 하나를 찔러보고 사람이 읽을 줄을 돌려준다. 절대 예외를 던지지 않는다. */
+async function probeOne(origin, path) {
+  let res;
+  try {
+    res = await withTimeout(PROBE_TIMEOUT_MS, (signal) =>
+      getJSON(joinUrl(origin, path), { signal })
+    );
+  } catch (err) {
+    if (err?.name === 'AbortError') return [`✗ ${path} — 응답 없음(시간 초과)`];
+    if (err instanceof NotJsonError || err?.name === 'NotJsonError') {
+      return [`✗ ${path} — JSON이 아님(없는 경로일 가능성)`];
+    }
+    if (err?.name === 'NotLoggedInError') return [`✗ ${path} — 로그인 페이지로 튕김`];
+    // HttpError 메시지에는 URL이 통째로 들어있어 잘리면 읽기만 나빠진다. 상태 코드면 충분하다.
+    if (err instanceof HttpError || err?.name === 'HttpError') {
+      return [`✗ ${path} — HTTP ${err.status}${err.status === 404 ? ' (없는 경로)' : ''}`];
+    }
+    return [`✗ ${path} — ${String(err?.message || err).slice(0, 60)}`];
+  }
+
+  // 배열이 아니라 객체 하나만 돌려주는 엔드포인트(users/self 등)도 0개로 보이면 곤란하다.
+  const found = flatten(extractArray(res.data));
+  const list = found.length || !res.data || typeof res.data !== 'object' ? found : [res.data];
+
+  const lines = [`✓ ${path} — ${list.length}개`];
+  const keys = list.length && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 14) : [];
+  if (keys.length) lines.push(`    필드: ${keys.join(', ')}`);
+
+  // 제목이 있어야 "여기에 강의영상이 있나"를 눈으로 판단할 수 있다.
+  const titles = list.slice(0, 4).map(titleOf).filter(Boolean);
+  if (titles.length) lines.push(`    예: ${titles.join(' | ')}`);
+
+  return lines;
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -287,11 +350,11 @@ class Board {
     this.body.append(box);
   }
 
-  showLoading() {
+  showLoading(label = '과목별 과제를 모으는 중…') {
     this.body.textContent = '';
     const box = el('div', 'msg');
     box.append(el('div', 'spin'));
-    box.append(el('div', null, '과목별 과제를 모으는 중…'));
+    box.append(el('div', null, label));
     this.body.append(box);
   }
 
@@ -301,11 +364,14 @@ class Board {
 
     try {
       // LearningX 어댑터는 Canvas 표준 API에 더해 주차별 강의영상 같은 자체 항목까지 긁는다.
-      const raw = await learningxAdapter.fetchAll(location.origin, {
-        lookAheadDays: LOOK_AHEAD_DAYS,
-        lookBackDays: LOOK_BACK_DAYS,
-        settings: {},
-      });
+      const raw = await withTimeout(LOAD_TIMEOUT_MS, (signal) =>
+        learningxAdapter.fetchAll(location.origin, {
+          signal,
+          lookAheadDays: LOOK_AHEAD_DAYS,
+          lookBackDays: LOOK_BACK_DAYS,
+          settings: {},
+        })
+      );
 
       const cutoff = Date.now() - LOOK_BACK_DAYS * 86400000;
       this.items = sortByDue(
@@ -338,6 +404,11 @@ class Board {
             ? `지금 보고 있는 ${location.hostname} 에서는 과제를 가져올 수 없습니다. 북마클릿은 열려 있는 페이지 안에서 실행되기 때문입니다.`
             : '지금은 e-Class가 아닌 화면입니다(사파리 시작 페이지 등). 북마클릿은 열려 있는 페이지 안에서 실행되기 때문에, e-Class 탭으로 옮긴 뒤 눌러야 합니다.',
           openEclass
+        );
+      } else if (err?.name === 'AbortError') {
+        this.showMessage(
+          '응답이 너무 늦습니다',
+          'e-Class가 제때 답하지 않았습니다. 잠시 뒤 새로고침(↻)을 눌러보세요.'
         );
       } else {
         this.showMessage('과제를 가져오지 못했습니다', message);
@@ -441,12 +512,27 @@ class Board {
     if (this.seg) this.seg.hidden = true;
     if (this.tools) this.tools.hidden = true;
     if (this.stats) this.stats.hidden = true;
-    this.showLoading();
+    this.showLoading('엔드포인트를 훑는 중…');
     this.status.textContent = '엔드포인트 확인 중…';
 
+    // 진단은 무슨 일이 있어도 결과를 보여주고 끝나야 한다.
+    // 여기서 예외가 새면 스피너만 남고 아무것도 알 수 없게 된다.
+    try {
+      this.renderProbe(await this.collectProbe());
+    } catch (err) {
+      this.renderProbe(`진단 중 오류: ${String(err?.message || err)}`);
+    }
+  }
+
+  async collectProbe() {
     const origin = location.origin;
-    const courses = await tryOr(() => fetchCourses(origin, undefined), new Map());
-    const courseId = [...(courses || new Map()).keys()][0];
+
+    const courses =
+      (await tryOr(
+        () => withTimeout(PROBE_TIMEOUT_MS, (signal) => fetchCourses(origin, signal)),
+        new Map()
+      )) || new Map();
+    const courseId = [...courses.keys()][0];
 
     const paths = [
       '/api/v1/users/self',
@@ -474,29 +560,18 @@ class Board {
       );
     }
 
-    const lines = [
-      `빌드 ${BUILD_REF} · 과목 ${courses ? courses.size : 0}개 · 기준 과목 ${courseId || '없음'}`,
+    let done = 0;
+    const results = await mapLimit(paths, 4, async (path) => {
+      const line = await probeOne(origin, path);
+      this.showLoading(`엔드포인트를 훑는 중… (${++done}/${paths.length})`);
+      return line;
+    });
+
+    return [
+      `빌드 ${BUILD_REF} · 과목 ${courses.size}개 · 기준 과목 ${courseId || '없음'}`,
       '',
-    ];
-    for (const path of paths) {
-      const res = await tryOr(() => getJSON(joinUrl(origin, path)), null);
-      if (!res) {
-        lines.push(`✗ ${path}`);
-        continue;
-      }
-      // 배열이 아니라 객체 하나만 돌려주는 엔드포인트(users/self 등)도 0개로 보이면 곤란하다.
-      const found = flatten(extractArray(res.data));
-      const list = found.length || !res.data || typeof res.data !== 'object' ? found : [res.data];
-      const keys = list.length && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 14) : [];
-      lines.push(`✓ ${path} — ${list.length}개`);
-      if (keys.length) lines.push(`    필드: ${keys.join(', ')}`);
-
-      // 제목이 있어야 "여기에 강의영상이 있나"를 눈으로 판단할 수 있다.
-      const titles = list.slice(0, 4).map(titleOf).filter(Boolean);
-      if (titles.length) lines.push(`    예: ${titles.join(' | ')}`);
-    }
-
-    this.renderProbe(lines.join('\n'));
+      ...results.flat(),
+    ].join('\n');
   }
 
   renderProbe(text) {

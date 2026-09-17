@@ -10,6 +10,21 @@ export class NotLoggedInError extends Error {
   }
 }
 
+/**
+ * JSON을 기대한 자리에 HTML이 온 경우.
+ *
+ * 로그인 만료와는 다르다. 없는 경로에 SPA 껍데기를 돌려주는 서버가 흔한데,
+ * 그걸 로그인 만료로 착각하면 "이 경로는 없다"가 "세션이 끊겼다"로 둔갑한다.
+ * 후보 경로를 찔러보는 코드에서는 이 차이가 치명적이다.
+ */
+export class NotJsonError extends Error {
+  constructor(url) {
+    super(`JSON이 아닌 응답입니다 — ${url}`);
+    this.name = 'NotJsonError';
+    this.url = url;
+  }
+}
+
 export class HttpError extends Error {
   constructor(status, url, body) {
     super(`HTTP ${status} — ${url}`);
@@ -39,10 +54,12 @@ export async function getJSON(url, { signal, headers } = {}) {
 
   if (!res.ok) throw new HttpError(res.status, url, text.slice(0, 500));
 
-  // JSON을 기대했는데 HTML이 오면 십중팔구 로그인 페이지로 리다이렉트된 것.
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('text/html') || /^\s*<(!doctype|html)/i.test(text)) {
-    throw new NotLoggedInError(url);
+    // 로그인 페이지로 튕긴 것인지, 그냥 없는 경로인지 구분한다.
+    // 리다이렉트됐거나 최종 주소가 로그인처럼 생겼으면 세션 문제로 본다.
+    const looksLikeLogin = res.redirected || /\/(login|signin|sso|auth)/i.test(res.url || '');
+    throw looksLikeLogin ? new NotLoggedInError(url) : new NotJsonError(url);
   }
 
   // Canvas 계열은 JSON 앞에 while(1); 를 붙여 보낸다.

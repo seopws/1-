@@ -9,6 +9,17 @@ import { dedupe, sortByDue } from '../src/lib/model.js';
 
 const ORIGIN = 'https://lms.test.ac.kr';
 
+/** Response.url 과 redirected 는 읽기 전용 게터라 defineProperty 로 심어야 한다. */
+function htmlResponse({ url, redirected }) {
+  const res = new Response('<!doctype html><html>…</html>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  });
+  Object.defineProperty(res, 'url', { value: url });
+  Object.defineProperty(res, 'redirected', { value: redirected });
+  return res;
+}
+
 /** 경로 → 응답 본문 맵으로 가짜 fetch를 만든다. */
 function stubFetch(routes) {
   const calls = [];
@@ -23,11 +34,12 @@ function stubFetch(routes) {
     if (!key) return new Response('not found', { status: 404 });
 
     const value = routes[key];
-    if (value === 'LOGIN_HTML') {
-      return new Response('<!doctype html><html>로그인</html>', {
-        status: 200,
-        headers: { 'content-type': 'text/html' },
-      });
+    if (value === 'LOGIN_HTML' || value === 'NOT_FOUND_HTML') {
+      return htmlResponse(
+        value === 'LOGIN_HTML'
+          ? { url: `${ORIGIN}/login/canvas`, redirected: true }
+          : { url: `${ORIGIN}${path}`, redirected: false }
+      );
     }
     return new Response(JSON.stringify(value), {
       status: 200,
@@ -139,7 +151,7 @@ test('canvas 어댑터: Canvas API가 없는 사이트는 detect가 false', asyn
   assert.equal(await canvasAdapter.detect(ORIGIN), false);
 });
 
-test('JSON 자리에 로그인 HTML이 오면 NotLoggedInError로 올린다', async () => {
+test('로그인 페이지로 튕기면 NotLoggedInError로 올린다', async () => {
   stubFetch({ '/api/v1/users/self/todo': 'LOGIN_HTML' });
 
   const { getJSON } = await import('../src/lib/http.js');
@@ -147,6 +159,25 @@ test('JSON 자리에 로그인 HTML이 오면 NotLoggedInError로 올린다', as
     () => getJSON(`${ORIGIN}/api/v1/users/self/todo`),
     (err) => err instanceof NotLoggedInError
   );
+});
+
+test('없는 경로의 HTML은 로그인 문제로 취급하지 않는다', async () => {
+  // 이걸 구분 못 하면, 후보 경로를 찔러보다 HTML 하나만 만나도
+  // 전체가 "로그인이 필요합니다"로 죽는다. 실제로 진단 화면이 그렇게 멈췄다.
+  stubFetch({ '/learningx/api/v1/courses/1/activities': 'NOT_FOUND_HTML' });
+
+  const { getJSON, NotJsonError, tryOr } = await import('../src/lib/http.js');
+  await assert.rejects(
+    () => getJSON(`${ORIGIN}/learningx/api/v1/courses/1/activities`),
+    (err) => err instanceof NotJsonError && !(err instanceof NotLoggedInError)
+  );
+
+  // tryOr 는 로그인 문제만 다시 던지고 나머지는 삼켜야 한다.
+  const fallback = await tryOr(
+    () => getJSON(`${ORIGIN}/learningx/api/v1/courses/1/activities`),
+    'skipped'
+  );
+  assert.equal(fallback, 'skipped');
 });
 
 test('custom 어댑터: 과목 목록을 돌며 {courseId}를 치환한다', async () => {

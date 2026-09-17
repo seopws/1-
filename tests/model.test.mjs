@@ -154,3 +154,31 @@ test('sortByPosted: 최근에 올라온 것부터', async () => {
   ];
   assert.deepEqual(sortByPosted(list).map((a) => a.title), ['최근 것', '오래된 것', '날짜 없음']);
 });
+
+test('HTML 응답: 로그인 페이지와 없는 경로를 구분한다', async () => {
+  const { getJSON, NotLoggedInError, NotJsonError } = await import('../src/lib/http.js');
+
+  const html = (url, redirected) => {
+    const res = new Response('<!doctype html><html>…</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(res, 'url', { value: url });
+    Object.defineProperty(res, 'redirected', { value: redirected });
+    return res;
+  };
+
+  // 로그인으로 튕긴 경우 — 세션 문제로 올려야 한다.
+  global.fetch = async () => html('https://eclass3.cau.ac.kr/login/canvas', true);
+  await assert.rejects(
+    () => getJSON('https://eclass3.cau.ac.kr/api/v1/users/self'),
+    (err) => err instanceof NotLoggedInError
+  );
+
+  // 없는 경로에 SPA 껍데기를 준 경우 — 이건 로그인 문제가 아니다.
+  global.fetch = async () => html('https://eclass3.cau.ac.kr/learningx/api/v1/nope', false);
+  await assert.rejects(
+    () => getJSON('https://eclass3.cau.ac.kr/learningx/api/v1/nope'),
+    (err) => err instanceof NotJsonError && !(err instanceof NotLoggedInError)
+  );
+});

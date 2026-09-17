@@ -146,6 +146,45 @@
     user-select: all;
   }
   .payload:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .payload.short { height: 62px; }
+
+  .fallback {
+    border-top: 1px solid var(--line);
+    padding-top: 15px;
+    margin-top: 2px;
+  }
+  .fallback summary {
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .fallback summary::-webkit-details-marker { display: none; }
+  .fallback summary::before {
+    content: '+';
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1;
+    color: var(--accent);
+  }
+  .fallback[open] summary::before { content: '−'; }
+  .fallback summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .fallback-why { margin: 12px 0 13px; font-size: 13.5px; color: var(--ink-dim); }
+  .fallback .payload { margin-top: 11px; }
+
+  .copy-btn.ghost {
+    background: var(--surface-sunk);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    font-size: 15px;
+    min-height: 46px;
+    padding: 12px 18px;
+    width: 100%;
+  }
+  .copy-btn.ghost[data-state='done'] { background: var(--ok); color: var(--surface); border-color: var(--ok); }
 
   .status {
     font-size: 13.5px;
@@ -275,19 +314,36 @@
     <p class="lede">
       아이패드 사파리에는 크롬 확장을 설치할 수 없습니다. 대신 북마크 하나를 만들어 두면,
       e-Class에서 그걸 누를 때마다 모든 과목의 과제 마감일이 D-day 순으로 뜹니다.
+      붙여넣을 코드는 세 줄 남짓입니다.
     </p>
   </header>
 
   <section class="action">
     <button class="copy-btn" id="copy" type="button">북마클릿 복사하기</button>
     <textarea
-      class="payload"
+      class="payload short"
       id="payload"
       readonly
       spellcheck="false"
       aria-label="북마클릿 코드"
-    >__BOOKMARKLET__</textarea>
+    >__LOADER__</textarea>
     <p class="status" id="status">버튼이 안 먹히면 위 칸을 길게 눌러 <kbd>전체 선택</kbd> → <kbd>복사</kbd></p>
+
+    <details class="fallback">
+      <summary>인터넷 없이 쓰는 전체 버전 (길어서 복사가 번거롭습니다)</summary>
+      <p class="fallback-why">
+        위 짧은 버전은 실행할 때 코드를 인터넷에서 내려받습니다. 그게 막히는 환경이라면
+        아래 전체 버전을 쓰세요. 동작은 완전히 같지만 길이가 19KB라 손으로 복사하기 어렵습니다.
+      </p>
+      <button class="copy-btn ghost" id="copy-full" type="button">전체 버전 복사하기</button>
+      <textarea
+        class="payload"
+        id="payload-full"
+        readonly
+        spellcheck="false"
+        aria-label="전체 버전 북마클릿 코드"
+      >__BOOKMARKLET__</textarea>
+    </details>
   </section>
 
   <section>
@@ -374,10 +430,7 @@
 
 <script>
   (function () {
-    var button = document.getElementById('copy');
-    var payload = document.getElementById('payload');
     var status = document.getElementById('status');
-    var resetTimer;
 
     function say(message, tone) {
       status.textContent = message;
@@ -387,56 +440,67 @@
 
     // iOS 사파리는 readonly textarea의 select()만으로는 복사가 안 걸린다.
     // Range로 직접 선택 범위를 잡아줘야 execCommand가 먹는다.
-    function selectAll() {
-      payload.readOnly = false;
-      payload.contentEditable = 'true';
+    function selectAll(field) {
+      field.readOnly = false;
+      field.contentEditable = 'true';
 
       var range = document.createRange();
-      range.selectNodeContents(payload);
+      range.selectNodeContents(field);
 
       var selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
-      payload.setSelectionRange(0, payload.value.length);
+      field.setSelectionRange(0, field.value.length);
 
-      payload.readOnly = true;
-      payload.contentEditable = 'false';
+      field.readOnly = true;
+      field.contentEditable = 'false';
     }
 
-    function done() {
-      button.textContent = '복사했습니다';
-      button.setAttribute('data-state', 'done');
-      say('이제 사파리 북마크의 주소 칸에 붙여넣으세요.', 'ok');
+    function wire(buttonId, fieldId, label) {
+      var button = document.getElementById(buttonId);
+      var field = document.getElementById(fieldId);
+      var resetTimer;
 
-      clearTimeout(resetTimer);
-      resetTimer = setTimeout(function () {
-        button.textContent = '북마클릿 복사하기';
-        button.removeAttribute('data-state');
-      }, 4000);
-    }
+      function done() {
+        button.textContent = '복사했습니다';
+        button.setAttribute('data-state', 'done');
+        say('이제 사파리 북마크의 주소 칸에 붙여넣으세요.', 'ok');
 
-    function fallback() {
-      selectAll();
-      var copied = false;
-      try {
-        copied = document.execCommand('copy');
-      } catch (err) {
-        copied = false;
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(function () {
+          button.textContent = label;
+          button.removeAttribute('data-state');
+        }, 4000);
       }
 
-      if (copied) done();
-      else say('자동 복사가 막혔습니다. 선택된 상태이니 길게 눌러 복사를 누르세요.', 'warn');
+      function byHand() {
+        selectAll(field);
+        var copied = false;
+        try {
+          copied = document.execCommand('copy');
+        } catch (err) {
+          copied = false;
+        }
+
+        if (copied) done();
+        else say('자동 복사가 막혔습니다. 선택된 상태이니 길게 눌러 복사를 누르세요.', 'warn');
+      }
+
+      button.addEventListener('click', function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(field.value).then(done, byHand);
+        } else {
+          byHand();
+        }
+      });
+
+      // 칸을 탭하면 바로 전체가 잡히게 — 긴 문자열을 손으로 끄는 건 아이패드에서 고역이다.
+      field.addEventListener('focus', function () {
+        selectAll(field);
+      });
     }
 
-    button.addEventListener('click', function () {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(payload.value).then(done, fallback);
-      } else {
-        fallback();
-      }
-    });
-
-    // 칸을 탭하면 바로 전체가 잡히게 — 긴 문자열을 손으로 끄는 건 아이패드에서 고역이다.
-    payload.addEventListener('focus', selectAll);
+    wire('copy', 'payload', '북마클릿 복사하기');
+    wire('copy-full', 'payload-full', '전체 버전 복사하기');
   })();
 </script>

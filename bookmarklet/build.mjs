@@ -2,6 +2,7 @@
 import { build } from 'esbuild';
 import { writeFile, mkdir } from 'node:fs/promises';
 
+const REPO = 'seopws/1-';
 const OUT_DIR = new URL('./dist/', import.meta.url);
 await mkdir(OUT_DIR, { recursive: true });
 
@@ -61,6 +62,59 @@ function toBookmarkletUrl(js) {
 
 const bookmarklet = toBookmarkletUrl(`(function(){${code}})();`);
 
+// ── 짧은 로더 ──────────────────────────────────────────────────────────────
+// 19KB짜리 문자열을 아이패드에서 손으로 복사하는 건 사실상 불가능하다.
+// 번들은 jsDelivr로 서빙하고, 북마크에는 그걸 불러오는 몇 줄만 넣는다.
+//
+// jsDelivr는 브랜치 이름에 슬래시가 있으면 경로를 잘못 끊으므로 커밋 SHA로 고정한다.
+// SHA 고정은 캐시도 영구적이라 오히려 유리하다.
+const { execFileSync } = await import('node:child_process');
+
+const ref = (() => {
+  const i = process.argv.indexOf('--ref');
+  if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
+  try {
+    return execFileSync('git', ['rev-parse', '--short=10', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+})();
+
+let loader = null;
+
+if (ref) {
+  // 로더가 낡은 코드를 가리키면 조용히 옛날 동작을 하게 된다. 그게 제일 고약하다.
+  let published = null;
+  try {
+    published = execFileSync('git', ['show', `${ref}:bookmarklet/dist/bookmarklet.js`], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 8,
+    });
+  } catch {
+    published = null;
+  }
+
+  if (published === null) {
+    console.warn(`⚠ ${ref} 에 bookmarklet.js 가 없습니다. 먼저 커밋한 뒤 --ref 로 그 SHA를 넘기세요.`);
+  } else if (published.trim() !== code.trim()) {
+    console.error(
+      `✗ ${ref} 의 번들이 방금 빌드한 것과 다릅니다.\n` +
+        '  로더가 낡은 코드를 가리키게 됩니다. 새 번들을 커밋한 뒤 그 SHA로 다시 빌드하세요.'
+    );
+    process.exit(1);
+  } else {
+    const src = `https://cdn.jsdelivr.net/gh/${REPO}@${ref}/bookmarklet/dist/bookmarklet.js`;
+    loader = toBookmarkletUrl(
+      `(function(){var s=document.createElement('script');` +
+        `s.src=${JSON.stringify(src)};` +
+        `s.onload=function(){s.remove()};` +
+        `s.onerror=function(){alert('과제 한눈에: 코드를 불러오지 못했습니다. 인터넷 연결을 확인하거나, 설치 페이지의 전체 버전을 쓰세요.')};` +
+        `(document.body||document.documentElement).appendChild(s)})();`
+    );
+    await writeFile(new URL('./loader.txt', OUT_DIR), loader);
+  }
+}
+
 await writeFile(new URL('./bookmarklet.js', OUT_DIR), code + '\n');
 await writeFile(new URL('./bookmarklet.txt', OUT_DIR), bookmarklet);
 
@@ -68,23 +122,27 @@ await writeFile(new URL('./bookmarklet.txt', OUT_DIR), bookmarklet);
 const { readFile } = await import('node:fs/promises');
 const template = await readFile(new URL('./src/install.template.html', import.meta.url), 'utf8');
 
-const forTextarea = bookmarklet
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;');
+const escapeHtml = (text) =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-if (!template.includes('__BOOKMARKLET__')) {
-  console.error('⚠ 템플릿에 __BOOKMARKLET__ 자리표시자가 없습니다.');
-  process.exit(1);
+for (const key of ['__BOOKMARKLET__', '__LOADER__']) {
+  if (!template.includes(key)) {
+    console.error(`⚠ 템플릿에 ${key} 자리표시자가 없습니다.`);
+    process.exit(1);
+  }
 }
 
 await writeFile(
   new URL('./install.html', OUT_DIR),
-  template.replace('__BOOKMARKLET__', forTextarea)
+  template
+    .replace('__LOADER__', escapeHtml(loader || bookmarklet))
+    .replace('__BOOKMARKLET__', escapeHtml(bookmarklet))
 );
 
 const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
-console.log(`번들 ${kb(code.length)} → 북마클릿 URL ${kb(bookmarklet.length)} → 설치 페이지 dist/install.html`);
+console.log(`번들 ${kb(code.length)} → 전체 북마클릿 ${kb(bookmarklet.length)}`);
+console.log(loader ? `로더 ${loader.length}자 (${ref}) → dist/loader.txt` : '로더 없음 — 전체 버전만 생성');
+console.log('설치 페이지 → dist/install.html');
 
 if (bookmarklet.length > 60000) {
   console.error('⚠ 북마클릿이 너무 깁니다. 브라우저 주소 길이 제한에 걸릴 수 있습니다.');

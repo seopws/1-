@@ -47,8 +47,9 @@ function render() {
   el.alert.hidden = !state.lastError;
   if (state.lastError) el.alert.textContent = state.lastError;
 
+  const term = state.assignments.find((a) => a.term)?.term;
   el.status.textContent = state.lastSync
-    ? `${new Date(state.lastSync.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준 · ${state.lastSync.adapter}`
+    ? `${term ? `${term} · ` : ''}${new Date(state.lastSync.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준`
     : '아직 동기화 전';
 
   const list = visible();

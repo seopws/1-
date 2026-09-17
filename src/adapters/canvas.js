@@ -34,8 +34,53 @@ function typeFromCanvas(item, fallback = 'other') {
   return fallback;
 }
 
-/** 수강 중인 과목 목록. id → 이름 매핑을 만든다. */
-export async function fetchCourses(origin, signal) {
+/**
+ * 어느 학기를 "이번 학기"로 볼지 고른다.
+ *
+ * enrollment_state=active 로 받아도 지난 학기 과목이 딸려오는 경우가 많다.
+ * 학기를 못 가르겠으면 null을 돌려주고, 그때는 아무것도 거르지 않는다.
+ * 잘못 걸러서 과제를 숨기는 쪽이 조금 지저분한 쪽보다 훨씬 나쁘다.
+ */
+export function pickCurrentTerm(courses, now = Date.now()) {
+  const terms = new Map();
+
+  for (const course of courses) {
+    const term = course.term || {};
+    const id = course.enrollment_term_id ?? term.id;
+    if (id == null) continue;
+
+    const key = String(id);
+    if (!terms.has(key)) {
+      terms.set(key, {
+        id: key,
+        name: term.name || '',
+        start: term.start_at ? new Date(term.start_at).getTime() : null,
+        end: term.end_at ? new Date(term.end_at).getTime() : null,
+        count: 0,
+      });
+    }
+    terms.get(key).count += 1;
+  }
+
+  if (terms.size <= 1) return null; // 나눌 게 없다
+
+  const all = [...terms.values()];
+  const ongoing = all.filter(
+    (t) => (t.start == null || t.start <= now) && (t.end == null || t.end >= now)
+  );
+  const pool = ongoing.length ? ongoing : all;
+
+  // 진행 중인 게 여럿이면 가장 늦게 시작한 학기. 날짜가 없으면 id가 큰 쪽(Canvas 학기 id는 증가한다).
+  return pool.sort(
+    (a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity) || Number(b.id) - Number(a.id)
+  )[0];
+}
+
+/**
+ * 수강 과목 목록. 이번 학기 것만 남기고, 어떤 학기를 골랐는지도 같이 돌려준다.
+ * @returns {{ names: Map<string,string>, termName: string, termId: string|null }}
+ */
+export async function fetchCourseIndex(origin, signal) {
   const courses =
     (await tryOr(() =>
       getAllPages(
@@ -44,12 +89,31 @@ export async function fetchCourses(origin, signal) {
       )
     )) || [];
 
-  const map = new Map();
-  for (const c of courses) {
-    if (!c || c.access_restricted_by_date) continue;
-    map.set(String(c.id), c.name || c.course_code || `과목 ${c.id}`);
+  const usable = courses.filter((c) => c && !c.access_restricted_by_date);
+  const term = pickCurrentTerm(usable);
+
+  const inTerm = term
+    ? usable.filter((c) => String(c.enrollment_term_id ?? c.term?.id ?? '') === term.id)
+    : usable;
+
+  // 거르고 나니 아무것도 안 남으면 거르지 않은 것만 못하다.
+  const kept = inTerm.length ? inTerm : usable;
+
+  const names = new Map();
+  for (const c of kept) {
+    names.set(String(c.id), c.name || c.course_code || `과목 ${c.id}`);
   }
-  return map;
+
+  return {
+    names,
+    termName: kept === inTerm && term ? term.name : '',
+    termId: kept === inTerm && term ? term.id : null,
+  };
+}
+
+/** id → 이름 매핑만 필요할 때. */
+export async function fetchCourses(origin, signal) {
+  return (await fetchCourseIndex(origin, signal)).names;
 }
 
 /** planner/items: Canvas가 "할 일"을 이미 합쳐서 주는 가장 좋은 소스. */
@@ -266,7 +330,7 @@ export const canvasAdapter = {
   },
 
   async fetchAll(origin, opts) {
-    const courseNames = await fetchCourses(origin, opts.signal);
+    const { names: courseNames, termName } = await fetchCourseIndex(origin, opts.signal);
 
     // 세 소스를 병렬로 긁고, 되는 것만 합친다. dedupe는 호출부에서.
     const [planner, todo, byCourse, modules] = await Promise.all([
@@ -279,6 +343,9 @@ export const canvasAdapter = {
     const all = [
       ...(planner || []), ...(todo || []), ...(byCourse || []), ...(modules || []),
     ];
+    // 어느 학기를 보고 있는지 화면에 적어줘야 "왜 그 과목이 없지?"를 스스로 확인할 수 있다.
+    for (const item of all) item.term = termName;
+
     if (!all.length) {
       throw new Error(
         'Canvas API는 응답했지만 과제를 하나도 못 찾았습니다. 옵션에서 다른 어댑터를 시도해 보세요.'

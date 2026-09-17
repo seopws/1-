@@ -83,8 +83,10 @@ function render() {
   $('alert').hidden = !state.lastError;
   if (state.lastError) $('alert').textContent = state.lastError;
 
+  // 어느 학기를 보고 있는지 적어둔다. 과목이 안 보일 때 스스로 확인할 수 있어야 한다.
+  const term = state.assignments.find((a) => a.term)?.term;
   $('status').textContent = state.lastSync
-    ? `마지막 동기화 ${new Date(state.lastSync.at).toLocaleString('ko-KR')} · ${state.lastSync.adapter} 어댑터 · 총 ${state.assignments.length}개`
+    ? `${term ? `${term} · ` : ''}마지막 동기화 ${new Date(state.lastSync.at).toLocaleString('ko-KR')} · ${state.lastSync.adapter} 어댑터 · 총 ${state.assignments.length}개`
     : '아직 동기화하지 않았습니다. 오른쪽 위 새로고침을 눌러주세요.';
 
   const pool = matching();

@@ -311,3 +311,70 @@ test('canvas 어댑터: 주차별 모듈에서 강의영상을 가져온다', as
   assert.ok(calls.some((u) => u.includes('/modules/77/items')));
   assert.equal(byTitle['4주차 강의영상'].type, 'video');
 });
+
+test('pickCurrentTerm: 진행 중인 학기를 고르고, 애매하면 거르지 않는다', async () => {
+  const { pickCurrentTerm } = await import('../src/adapters/canvas.js');
+  const now = new Date('2026-09-17T00:00:00Z').getTime();
+
+  const course = (termId, name, start, end) => ({
+    id: termId * 10,
+    enrollment_term_id: termId,
+    term: { id: termId, name, start_at: start, end_at: end },
+  });
+
+  // 지난 학기가 같이 딸려와도 지금 진행 중인 학기를 고른다.
+  const picked = pickCurrentTerm(
+    [
+      course(11, '2026-1학기', '2026-03-02T00:00:00Z', '2026-06-30T00:00:00Z'),
+      course(12, '2026-2학기', '2026-09-01T00:00:00Z', '2026-12-31T00:00:00Z'),
+    ],
+    now
+  );
+  assert.equal(picked.name, '2026-2학기');
+
+  // 학기 날짜가 없으면 id가 큰 쪽. Canvas 학기 id는 증가한다.
+  const noDates = pickCurrentTerm(
+    [course(11, '지난 학기', null, null), course(12, '이번 학기', null, null)],
+    now
+  );
+  assert.equal(noDates.name, '이번 학기');
+
+  // 학기가 하나뿐이면 거를 이유가 없다.
+  assert.equal(pickCurrentTerm([course(12, '2026-2학기', null, null)], now), null);
+  assert.equal(pickCurrentTerm([], now), null);
+});
+
+test('fetchCourseIndex: 지난 학기 과목을 빼고 학기 이름을 알려준다', async () => {
+  const { fetchCourseIndex } = await import('../src/adapters/canvas.js');
+
+  stubFetch({
+    '/api/v1/courses': [
+      { id: 1, name: '지난학기 미적분', enrollment_term_id: 11,
+        term: { id: 11, name: '2026-1학기', start_at: '2026-03-02T00:00:00Z', end_at: '2026-06-30T00:00:00Z' } },
+      { id: 2, name: '운영체제', enrollment_term_id: 12,
+        term: { id: 12, name: '2026-2학기', start_at: '2026-09-01T00:00:00Z', end_at: '2026-12-31T00:00:00Z' } },
+      { id: 3, name: '논리회로', enrollment_term_id: 12,
+        term: { id: 12, name: '2026-2학기', start_at: '2026-09-01T00:00:00Z', end_at: '2026-12-31T00:00:00Z' } },
+    ],
+  });
+
+  const index = await fetchCourseIndex(ORIGIN);
+  assert.deepEqual([...index.names.values()].sort(), ['논리회로', '운영체제']);
+  assert.equal(index.termName, '2026-2학기');
+  assert.equal(index.names.has('1'), false, '지난 학기 과목은 빠져야 한다');
+});
+
+test('fetchCourseIndex: 학기 정보가 없으면 아무것도 거르지 않는다', async () => {
+  const { fetchCourseIndex } = await import('../src/adapters/canvas.js');
+
+  stubFetch({
+    '/api/v1/courses': [
+      { id: 1, name: '과목 A' },
+      { id: 2, name: '과목 B' },
+    ],
+  });
+
+  const index = await fetchCourseIndex(ORIGIN);
+  assert.equal(index.names.size, 2, '못 가르겠으면 숨기지 말아야 한다');
+  assert.equal(index.termName, '');
+});

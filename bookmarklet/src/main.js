@@ -378,9 +378,10 @@ class Board {
         dedupe(raw).filter((a) => !a.dueAt || new Date(a.dueAt).getTime() >= cutoff)
       );
 
-      this.status.textContent = `${new Date().toLocaleTimeString('ko-KR', {
-        hour: '2-digit', minute: '2-digit',
-      })} 기준 · 총 ${this.items.length}개`;
+      // 어느 학기를 보고 있는지 적어둔다. 과목이 안 보일 때 스스로 확인할 수 있어야 한다.
+      const term = this.items.find((a) => a.term)?.term;
+      const time = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      this.status.textContent = `${term ? `${term} · ` : ''}${time} 기준 · 총 ${this.items.length}개`;
 
       this.buildTools();
       this.render();

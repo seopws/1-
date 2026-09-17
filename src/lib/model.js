@@ -104,6 +104,7 @@ export function normalize(item, ctx = {}) {
     submitted: typeof item.submitted === 'boolean' ? item.submitted : null,
     points: item.points ?? null,
     note: item.note ? String(item.note) : '',
+    term: item.term ? String(item.term) : '',
   };
 
   shaped.kind = kindOf(shaped);

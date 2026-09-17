@@ -7,7 +7,7 @@
 
 import { getJSON, tryOr, joinUrl } from '../lib/http.js';
 import { normalize } from '../lib/model.js';
-import { canvasAdapter, fetchCourses } from './canvas.js';
+import { canvasAdapter, fetchCourseIndex } from './canvas.js';
 
 const SOURCE = 'learningx';
 
@@ -145,7 +145,8 @@ export const learningxAdapter = {
     const canvasItems = (await tryOr(() => canvasAdapter.fetchAll(origin, opts), [])) || [];
 
     // 2) LearningX 고유 항목을 보조로 얹는다.
-    const courseNames = await fetchCourses(origin, signal);
+    // canvas 어댑터와 같은 과목 집합(이번 학기)을 써야 결과가 갈리지 않는다.
+    const { names: courseNames, termName } = await fetchCourseIndex(origin, signal);
 
     const todo = await firstWorking(origin, TODO_CANDIDATES, signal);
     const lxTodo = (todo?.items || [])
@@ -162,7 +163,10 @@ export const learningxAdapter = {
       })
     );
 
-    const all = [...canvasItems, ...lxTodo, ...perCourse.flat()];
+    const own = [...lxTodo, ...perCourse.flat()];
+    for (const item of own) item.term = item.term || termName;
+
+    const all = [...canvasItems, ...own];
     if (!all.length) {
       throw new Error(
         'LearningX API에서 과제를 찾지 못했습니다. docs/DISCOVERY.md를 보고 실제 엔드포인트를 확인한 뒤 "직접 지정" 어댑터에 넣어주세요.'

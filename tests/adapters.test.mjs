@@ -252,3 +252,62 @@ test('learningx 어댑터: 감싸인 응답에서도 강의영상을 찾아낸�
   assert.equal(watched.dueAt, null);
   assert.ok(items.some((a) => a.title === '3주차 보고서'), 'Canvas 쪽 과제도 그대로 유지되어야 한다');
 });
+
+test('canvas 어댑터: 주차별 모듈에서 강의영상을 가져온다', async () => {
+  const calls = stubFetch({
+    '/api/v1/users/self': { id: 1, name: '학생' },
+    '/api/v1/courses': [{ id: 101, name: '운영체제' }],
+    '/api/v1/planner/items': [],
+    '/api/v1/users/self/todo': [],
+    '/api/v1/courses/101/assignments': [
+      { id: 9, name: '3주차 과제', due_at: '2026-09-20T14:59:00Z', html_url: '/courses/101/assignments/9' },
+    ],
+    '/api/v1/courses/101/modules/77/items': [
+      // items 가 인라인으로 안 왔을 때의 보조 경로
+      { id: 205, type: 'ExternalTool', title: '4주차 강의영상', html_url: '/courses/101/modules/items/205',
+        completion_requirement: { type: 'must_view', completed: false } },
+    ],
+    '/api/v1/courses/101/modules': [
+      {
+        id: 76,
+        name: '3주차',
+        items: [
+          { id: 200, type: 'SubHeader', title: '3주차 학습' },
+          { id: 201, type: 'ExternalTool', title: '3주차 강의영상 1', html_url: '/courses/101/modules/items/201',
+            completion_requirement: { type: 'must_view', completed: true } },
+          { id: 202, type: 'ExternalTool', title: '3주차 강의영상 2', html_url: '/courses/101/modules/items/202',
+            completion_requirement: { type: 'must_view', completed: false } },
+          { id: 203, type: 'Page', title: '3주차 강의노트', html_url: '/courses/101/modules/items/203',
+            completion_requirement: { type: 'must_view', completed: false } },
+          { id: 204, type: 'Page', title: '참고 링크 모음', html_url: '/courses/101/modules/items/204' },
+          // 과제는 assignments 쪽에서 마감일과 함께 가져오므로 여기서는 건너뛰어야 한다
+          { id: 9, type: 'Assignment', title: '3주차 과제', html_url: '/courses/101/assignments/9' },
+        ],
+      },
+      { id: 77, name: '4주차' }, // items 없음 → 별도 요청으로 받아와야 한다
+    ],
+  });
+
+  const items = dedupe(await canvasAdapter.fetchAll(ORIGIN, { lookAheadDays: 60, lookBackDays: 14 }));
+  const byTitle = Object.fromEntries(items.map((a) => [a.title, a]));
+
+  const video = byTitle['3주차 강의영상 1'];
+  assert.equal(video.type, 'video');
+  assert.equal(video.kind, 'task', '들어야 할 영상은 할 일이다');
+  assert.equal(video.submitted, true, 'must_view 완료는 시청 완료로 읽어야 한다');
+  assert.equal(byTitle['3주차 강의영상 2'].submitted, false);
+
+  assert.equal(byTitle['3주차 강의노트'].type, 'material');
+  assert.equal(byTitle['3주차 강의노트'].kind, 'resource');
+
+  assert.equal(byTitle['참고 링크 모음'], undefined, '요구사항 없는 자료는 노이즈라 담지 않는다');
+  assert.equal(byTitle['3주차 학습'], undefined, 'SubHeader 는 항목이 아니다');
+
+  // 과제는 모듈이 아니라 assignments 쪽 것 하나만 남고, 마감일이 살아있어야 한다.
+  assert.equal(items.filter((a) => a.title === '3주차 과제').length, 1);
+  assert.equal(byTitle['3주차 과제'].dueAt, '2026-09-20T14:59:00.000Z');
+
+  // items 가 빠진 모듈은 별도 요청으로 채운다.
+  assert.ok(calls.some((u) => u.includes('/modules/77/items')));
+  assert.equal(byTitle['4주차 강의영상'].type, 'video');
+});

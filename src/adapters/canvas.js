@@ -160,6 +160,99 @@ async function fromCourseAssignments(origin, courseNames, { signal }) {
   return out;
 }
 
+// 제목만으로 영상을 알아보는 규칙. LearningX는 영상을 LTI(ExternalTool)로 끼워 넣는 일이 많아
+// 타입만으로는 구분이 안 된다.
+const VIDEO_TITLE = /영상|동영상|시청|녹화|강의보기|vod|video|lecture|streaming/i;
+
+function typeFromModuleItem(item) {
+  const type = String(item.type || '').toLowerCase();
+  const title = String(item.title || '');
+
+  if (type === 'externaltool' || VIDEO_TITLE.test(title)) return 'video';
+  if (type === 'page' || type === 'file' || type === 'attachment' || type === 'externalurl') {
+    return 'material';
+  }
+  return 'other';
+}
+
+/**
+ * 주차별 학습활동(모듈)에서 "봐야 하는 것"을 가져온다.
+ *
+ * LearningX의 강의영상은 대개 여기 모듈 항목으로 들어있다. 마감일은 없지만
+ * completion_requirement 가 "이걸 봐야 한다"와 "봤는지"를 알려준다.
+ *
+ * 과제·퀴즈·토론 항목은 일부러 건너뛴다. 그쪽은 assignments/planner 에서
+ * 제대로 된 마감일과 함께 이미 가져오므로, 여기서 또 담으면 마감일 없는
+ * 중복이 생긴다.
+ */
+async function fromModules(origin, courseNames, { signal }) {
+  const ids = [...courseNames.keys()];
+
+  const perCourse = await Promise.all(
+    ids.map(async (courseId) => {
+      const modules =
+        (await tryOr(() =>
+          getAllPages(
+            joinUrl(origin, `/api/v1/courses/${courseId}/modules?include[]=items&per_page=50`),
+            { signal, maxPages: 3 }
+          )
+        , [])) || [];
+
+      const out = [];
+      for (const mod of modules) {
+        if (!mod) continue;
+
+        // Canvas는 항목이 많으면 items 를 빼고 준다. 그럴 땐 따로 받아온다.
+        let items = mod.items;
+        if (!Array.isArray(items)) {
+          items =
+            (await tryOr(() =>
+              getAllPages(
+                joinUrl(origin, `/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=50`),
+                { signal, maxPages: 2 }
+              )
+            , [])) || [];
+        }
+
+        for (const item of items) {
+          if (!item || !item.title) continue;
+
+          const type = String(item.type || '').toLowerCase();
+          if (type === 'subheader') continue;
+          if (['assignment', 'quiz', 'discussion'].includes(type)) continue;
+
+          const requirement = item.completion_requirement;
+          const kind = typeFromModuleItem(item);
+
+          // 아무 요구사항도 없고 영상처럼 보이지도 않으면 그냥 자료 더미다. 안 담는다.
+          if (!requirement && kind !== 'video') continue;
+
+          out.push(
+            normalize(
+              {
+                id: `module:${item.id}`,
+                source: SOURCE,
+                courseId,
+                courseName: courseNames.get(courseId),
+                title: item.title,
+                type: kind,
+                dueAt: null, // 모듈 항목에는 마감일이 없다
+                url: item.html_url ? joinUrl(origin, item.html_url) : '',
+                submitted: requirement ? Boolean(requirement.completed) : null,
+                note: mod.name || '',
+              },
+              { source: SOURCE }
+            )
+          );
+        }
+      }
+      return out;
+    })
+  );
+
+  return perCourse.flat();
+}
+
 export const canvasAdapter = {
   id: 'canvas',
   label: 'Canvas 표준 API (/api/v1)',
@@ -176,13 +269,16 @@ export const canvasAdapter = {
     const courseNames = await fetchCourses(origin, opts.signal);
 
     // 세 소스를 병렬로 긁고, 되는 것만 합친다. dedupe는 호출부에서.
-    const [planner, todo, byCourse] = await Promise.all([
+    const [planner, todo, byCourse, modules] = await Promise.all([
       tryOr(() => fromPlanner(origin, courseNames, opts), []),
       tryOr(() => fromTodo(origin, courseNames, opts), []),
       courseNames.size ? tryOr(() => fromCourseAssignments(origin, courseNames, opts), []) : [],
+      courseNames.size ? tryOr(() => fromModules(origin, courseNames, opts), []) : [],
     ]);
 
-    const all = [...(planner || []), ...(todo || []), ...(byCourse || [])];
+    const all = [
+      ...(planner || []), ...(todo || []), ...(byCourse || []), ...(modules || []),
+    ];
     if (!all.length) {
       throw new Error(
         'Canvas API는 응답했지만 과제를 하나도 못 찾았습니다. 옵션에서 다른 어댑터를 시도해 보세요.'

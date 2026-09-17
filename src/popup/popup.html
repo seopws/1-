@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../lib/ui.css" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>과제 한눈에</title>
+  </head>
+  <body>
+    <header>
+      <div>
+        <strong>과제 한눈에</strong>
+        <div class="muted" id="status">불러오는 중…</div>
+      </div>
+      <div class="actions">
+        <button id="refresh" title="지금 새로고침">↻</button>
+        <button id="open" title="전체 화면으로 보기">⤢</button>
+      </div>
+    </header>
+
+    <div id="alert" class="banner" hidden></div>
+
+    <nav id="tabs">
+      <button data-scope="soon" class="active">임박순</button>
+      <button data-scope="today">오늘·내일</button>
+      <button data-scope="all">전체</button>
+    </nav>
+
+    <main id="list"></main>
+
+    <footer>
+      <button id="options">설정</button>
+      <span class="muted" id="count"></span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

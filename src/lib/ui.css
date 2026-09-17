@@ -1,0 +1,126 @@
+/* 팝업 / 대시보드 / 옵션이 같이 쓰는 토큰과 기본 컴포넌트. */
+
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --border: #e4e7ec;
+  --text: #101828;
+  --text-dim: #667085;
+  --accent: #3538cd;
+  --accent-soft: #eef4ff;
+
+  --overdue: #b42318;
+  --overdue-bg: #fef3f2;
+  --urgent: #c4320a;
+  --urgent-bg: #fff4ed;
+  --soon: #b54708;
+  --soon-bg: #fffaeb;
+  --week: #026aa2;
+  --week-bg: #f0f9ff;
+  --later: #475467;
+  --later-bg: #f2f4f7;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --surface: #1c1f24;
+    --surface-2: #24282e;
+    --border: #2f343b;
+    --text: #e7eaee;
+    --text-dim: #98a2b3;
+    --accent: #a4bcfd;
+    --accent-soft: #232842;
+
+    --overdue: #fda29b; --overdue-bg: #3a1c19;
+    --urgent: #fdb894;  --urgent-bg: #3a2318;
+    --soon: #fdd87d;    --soon-bg: #382e14;
+    --week: #7cd4fd;    --week-bg: #12283a;
+    --later: #cfd4dc;   --later-bg: #262a30;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+@media (prefers-color-scheme: dark) { button.primary { color: #14161a; } }
+button.primary:hover { filter: brightness(1.08); }
+
+input[type='text'], input[type='url'], input[type='number'], select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.dday {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dday.overdue { color: var(--overdue); background: var(--overdue-bg); }
+.dday.urgent  { color: var(--urgent);  background: var(--urgent-bg); }
+.dday.soon    { color: var(--soon);    background: var(--soon-bg); }
+.dday.week    { color: var(--week);    background: var(--week-bg); }
+.dday.later   { color: var(--later);   background: var(--later-bg); }
+.dday.none    { color: var(--text-dim); background: var(--surface-2); }
+
+.muted { color: var(--text-dim); }
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.banner {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--overdue-bg);
+  color: var(--overdue);
+  font-size: 13px;
+}
+.banner.info { background: var(--accent-soft); color: var(--accent); }

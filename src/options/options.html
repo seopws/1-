@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../lib/ui.css" />
+    <link rel="stylesheet" href="options.css" />
+    <title>과제 한눈에 — 설정</title>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>과제 한눈에 · 설정</h1>
+
+      <div id="toast" class="banner info" hidden></div>
+
+      <!-- 1. 연결 -->
+      <section class="card">
+        <h2>1. 학교 LMS 연결</h2>
+        <p class="muted">
+          LearningX 주소를 그대로 넣으면 됩니다. 로그인한 뒤 주소창에 보이는 도메인까지만.
+        </p>
+
+        <label>
+          LMS 주소
+          <div class="inline">
+            <input type="url" id="origin" placeholder="https://lms.myuniv.ac.kr" />
+            <button id="grant">권한 허용</button>
+          </div>
+          <small id="permState" class="muted"></small>
+        </label>
+
+        <label>
+          데이터 가져오는 방식
+          <select id="adapter">
+            <option value="auto">자동 감지 (권장)</option>
+            <option value="learningx">LearningX 확장 API</option>
+            <option value="canvas">Canvas 표준 API (/api/v1)</option>
+            <option value="custom">직접 지정한 엔드포인트</option>
+            <option value="html">HTML 스크래핑</option>
+          </select>
+        </label>
+
+        <div class="inline">
+          <button id="test" class="primary">연결 테스트</button>
+          <button id="syncNow">지금 전체 동기화</button>
+        </div>
+        <pre id="testOut" hidden></pre>
+      </section>
+
+      <!-- 2. 탐색 -->
+      <section class="card">
+        <h2>2. 엔드포인트 탐색 <span class="muted">(자동 감지가 실패했을 때)</span></h2>
+        <p class="muted">
+          탐색을 켠 뒤 LMS에서 <strong>과제/할 일 목록 페이지를 한 번 열어보세요.</strong>
+          마감일처럼 생긴 필드가 들어있는 응답만 골라서 아래에 모아줍니다.
+          개발자도구 Network 탭을 직접 뒤질 필요가 없습니다.
+        </p>
+
+        <div class="inline">
+          <button id="captureOn">탐색 켜기</button>
+          <button id="captureOff">탐색 끄기</button>
+          <button id="captureRefresh">목록 새로고침</button>
+          <button id="captureClear">비우기</button>
+        </div>
+
+        <div id="captures" class="captures"></div>
+      </section>
+
+      <!-- 3. 직접 지정 -->
+      <section class="card" id="customCard">
+        <h2>3. 직접 지정 어댑터</h2>
+        <p class="muted">
+          위에서 찾은 엔드포인트를 여기에 넣습니다. <code>{courseId}</code> 를 쓰면 과목별로 반복 요청합니다.
+        </p>
+
+        <label>과제 목록 URL<input type="text" id="c_itemsUrl" placeholder="/api/v1/courses/{courseId}/assignments?per_page=100" /></label>
+        <label>과제 배열 경로 <small class="muted">최상위가 배열이면 비워둠</small><input type="text" id="c_itemsPath" placeholder="data.items" /></label>
+
+        <div class="grid">
+          <label>제목 필드<input type="text" id="m_title" placeholder="name" /></label>
+          <label>마감일 필드<input type="text" id="m_dueAt" placeholder="due_at" /></label>
+          <label>ID 필드<input type="text" id="m_id" placeholder="id" /></label>
+          <label>링크 필드<input type="text" id="m_url" placeholder="html_url" /></label>
+          <label>과목명 필드<input type="text" id="m_courseName" placeholder="course_name" /></label>
+          <label>제출여부 필드<input type="text" id="m_submitted" placeholder="is_submitted" /></label>
+        </div>
+
+        <details>
+          <summary>과목 목록도 따로 필요한 경우</summary>
+          <label>과목 목록 URL<input type="text" id="c_coursesUrl" placeholder="/api/v1/courses?enrollment_state=active" /></label>
+          <label>과목 배열 경로<input type="text" id="c_coursesPath" /></label>
+          <div class="grid">
+            <label>과목 ID 필드<input type="text" id="cm_id" placeholder="id" /></label>
+            <label>과목명 필드<input type="text" id="cm_name" placeholder="name" /></label>
+          </div>
+        </details>
+      </section>
+
+      <!-- 4. HTML -->
+      <section class="card">
+        <h2>4. HTML 스크래핑 <span class="muted">(최후의 수단)</span></h2>
+        <div class="grid">
+          <label>목록 페이지 URL<input type="text" id="h_listUrl" placeholder="/todo" /></label>
+          <label>행 선택자<input type="text" id="h_rowSelector" placeholder="table.todo tbody tr" /></label>
+          <label>제목 선택자<input type="text" id="h_titleSelector" placeholder="td.title a" /></label>
+          <label>마감일 선택자<input type="text" id="h_dueSelector" placeholder="td.due" /></label>
+          <label>과목명 선택자<input type="text" id="h_courseSelector" placeholder="td.course" /></label>
+          <label>링크 선택자<input type="text" id="h_linkSelector" placeholder="a" /></label>
+        </div>
+      </section>
+
+      <!-- 5. 보기/알림 -->
+      <section class="card">
+        <h2>5. 새로고침과 알림</h2>
+        <div class="grid">
+          <label>자동 새로고침 주기(분)<input type="number" id="refreshMinutes" min="15" max="1440" /></label>
+          <label>앞으로 며칠까지 볼지<input type="number" id="lookAheadDays" min="7" max="365" /></label>
+          <label>지난 마감 며칠까지 볼지<input type="number" id="lookBackDays" min="0" max="90" /></label>
+        </div>
+
+        <label class="check"><input type="checkbox" id="notifyEnabled" /> 마감 알림 받기</label>
+        <label>알림 시점 <small class="muted">마감 몇 분 전인지, 쉼표로 구분 (1440 = 하루 전)</small>
+          <input type="text" id="notifyOffsets" placeholder="1440, 180" />
+        </label>
+        <label class="check"><input type="checkbox" id="hideSubmitted" /> 제출 완료한 과제는 기본으로 숨기기</label>
+      </section>
+
+      <div class="sticky">
+        <button id="save" class="primary">저장</button>
+        <span class="muted" id="saveState"></span>
+      </div>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

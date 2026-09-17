@@ -7,7 +7,9 @@
 // 어댑터·날짜 계산·ics 생성은 확장과 같은 모듈을 그대로 쓴다. 화면만 새로 그린다.
 
 import { canvasAdapter } from '../../src/adapters/canvas.js';
-import { dedupe, sortByDue, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL } from '../../src/lib/model.js';
+import {
+  dedupe, sortByDue, sortByPosted, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL,
+} from '../../src/lib/model.js';
 import { toICS } from '../../src/lib/ics.js';
 
 const HOST_ID = 'gwaje-hannune-root';
@@ -19,6 +21,7 @@ const LOOK_BACK_DAYS = 14;
 
 const CSS = `
 :host { all: initial; }
+[hidden] { display: none !important; }
 * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI', 'Noto Sans KR', sans-serif; }
 
 .backdrop {
@@ -62,6 +65,10 @@ button.primary { background: #3538cd; border-color: #3538cd; color: #fff; font-w
 .stat.urgent .n { color: #c4320a; }
 .stat.soon .n { color: #b54708; }
 
+.seg { display: flex; gap: 4px; margin: 12px 16px 0; padding: 3px; background: #eaecf0; border-radius: 11px; }
+.seg button { flex: 1; border: none; background: transparent; color: #667085; font-size: 14px; font-weight: 600; border-radius: 8px; padding: 9px 6px; min-height: 40px; line-height: 1.2; }
+.seg button[aria-selected='true'] { background: #fff; color: #101828; box-shadow: 0 1px 2px rgba(16,24,40,0.1); }
+.seg .c { font-weight: 500; opacity: 0.65; margin-left: 4px; font-variant-numeric: tabular-nums; }
 .tools { display: flex; gap: 8px; padding: 12px 16px; align-items: center; flex-wrap: wrap; }
 input[type=search], select {
   font: inherit; font-size: 15px; padding: 9px 11px; min-height: 40px;
@@ -104,6 +111,7 @@ main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 
 .dday.week    { color: #026aa2; background: #f0f9ff; }
 .dday.later   { color: #475467; background: #f2f4f7; }
 .dday.none    { color: #667085; background: #f2f4f7; }
+.dday.posted  { color: #475467; background: #f2f4f7; font-weight: 600; }
 
 footer { display: flex; gap: 8px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom)); border-top: 1px solid #e4e7ec; background: #fff; }
 footer button { flex: 1; }
@@ -132,7 +140,10 @@ footer button { flex: 1; }
   .dday.urgent  { color: #fdb894; background: #3a2318; }
   .dday.soon    { color: #fdd87d; background: #382e14; }
   .dday.week    { color: #7cd4fd; background: #12283a; }
-  .dday.later, .dday.none { color: #cfd4dc; background: #262a30; }
+  .dday.later, .dday.none, .dday.posted { color: #cfd4dc; background: #262a30; }
+  .seg { background: #24282e; }
+  .seg button { color: #98a2b3; }
+  .seg button[aria-selected='true'] { background: #12151a; color: #e7eaee; }
   .tag.ok { background: #12283a; color: #7cd4fd; }
 }
 `;
@@ -154,6 +165,7 @@ function courseColor(name) {
 class Board {
   constructor() {
     this.items = [];
+    this.view = 'task'; // 'task' = 해야 할 것, 'resource' = 공지·강의자료
     this.filters = { q: '', course: '', hideDone: false };
 
     const host = el('div');
@@ -285,9 +297,33 @@ class Board {
   }
 
   buildTools() {
+    if (this.seg) this.seg.remove();
     if (this.tools) this.tools.remove();
     if (this.stats) this.stats.remove();
     if (this.footer) this.footer.remove();
+
+    // 과제와 자료를 한 목록에 섞으면 둘 다 안 보인다. 칸을 나눈다.
+    this.seg = el('div', 'seg');
+    this.segButtons = {};
+    for (const [view, label] of [['task', '과제'], ['resource', '자료 · 공지']]) {
+      const button = el('button', null, label);
+      button.type = 'button';
+      button.setAttribute('aria-selected', String(this.view === view));
+      const count = el('span', 'c');
+      button.append(count);
+      this.segCounts = this.segCounts || {};
+      this.segCounts[view] = count;
+
+      button.addEventListener('click', () => {
+        this.view = view;
+        for (const [key, node] of Object.entries(this.segButtons)) {
+          node.setAttribute('aria-selected', String(key === view));
+        }
+        this.render();
+      });
+      this.segButtons[view] = button;
+      this.seg.append(button);
+    }
 
     this.stats = el('div', 'stats');
 
@@ -318,20 +354,23 @@ class Board {
       this.render();
     });
     toggle.append(check, document.createTextNode('제출완료 숨기기'));
+    this.submittedToggle = toggle;
 
     this.tools.append(search, course, toggle);
 
     this.footer = el('footer');
-    const ics = el('button', 'primary', '캘린더에 넣기 (.ics)');
+    const ics = el('button', 'primary', '캘린더에 넣기');
     ics.addEventListener('click', () => this.exportICS());
     this.footer.append(ics);
 
+    this.sheet.insertBefore(this.seg, this.body);
     this.sheet.insertBefore(this.stats, this.body);
     this.sheet.insertBefore(this.tools, this.body);
     this.sheet.append(this.footer);
   }
 
-  visible() {
+  /** 현재 탭과 무관하게, 검색·과목 필터만 적용한 목록. */
+  matching() {
     const { q, course, hideDone } = this.filters;
     return this.items.filter((a) => {
       if (hideDone && a.submitted) return false;
@@ -341,18 +380,43 @@ class Board {
     });
   }
 
+  visible() {
+    return this.matching().filter((a) => a.kind === this.view);
+  }
+
   render() {
     const now = Date.now();
-    const list = this.visible();
+    const matching = this.matching();
 
-    this.renderStats(list, now);
+    // 탭 숫자는 현재 검색·과목 필터 기준으로 센다.
+    if (this.segCounts) {
+      this.segCounts.task.textContent = String(matching.filter((a) => a.kind === 'task').length);
+      this.segCounts.resource.textContent = String(matching.filter((a) => a.kind === 'resource').length);
+    }
+
+    const list = this.visible();
+    const isTask = this.view === 'task';
+
+    // 자료에는 마감 통계도, 제출 여부도 의미가 없다.
+    this.stats.hidden = !isTask;
+    if (this.submittedToggle) this.submittedToggle.hidden = !isTask;
+    if (isTask) this.renderStats(list, now);
+
     this.body.textContent = '';
 
     if (!list.length) {
-      this.showMessage('표시할 과제가 없습니다', this.items.length ? '검색어나 필터를 지워보세요.' : '마감일이 걸린 과제가 없습니다.');
+      this.showMessage(
+        isTask ? '해야 할 과제가 없습니다' : '올라온 자료가 없습니다',
+        this.items.length ? '검색어나 과목 필터를 지워보세요.' : '가져온 항목이 없습니다.'
+      );
       return;
     }
 
+    if (isTask) this.renderTasks(sortByDue(list), now);
+    else this.renderResources(sortByPosted(list), now);
+  }
+
+  renderTasks(list, now) {
     const grouped = new Map();
     for (const a of list) {
       const key = bucketOf(a, now);
@@ -374,8 +438,19 @@ class Board {
     }
   }
 
+  /** 자료·공지는 마감이 없다. 최근에 올라온 것부터 보면 된다. */
+  renderResources(list, now) {
+    const head = el('div', 'glabel', '최근 올라온 순');
+    head.append(el('span', 'n', String(list.length)));
+
+    const card = el('div', 'card');
+    for (const a of list) card.append(this.rowNode(a, now));
+
+    this.body.append(head, card);
+  }
+
   renderStats(list, now) {
-    const open = (a) => !a.submitted && a.dueAt;
+    const open = (a) => a.kind === 'task' && !a.submitted && a.dueAt;
     const within = (a, n) => {
       const d = ddayInfo(a.dueAt, now).days;
       return d >= 0 && d <= n;
@@ -397,7 +472,6 @@ class Board {
   }
 
   rowNode(a, now) {
-    const d = ddayInfo(a.dueAt, now);
     const node = a.url ? document.createElement('a') : el('div');
     node.className = `row${a.submitted ? ' done' : ''}`;
     if (a.url) {
@@ -406,7 +480,19 @@ class Board {
       node.rel = 'noopener';
     }
 
-    node.append(el('span', `dday ${d.tone}`, d.label));
+    if (a.kind === 'resource') {
+      // 마감이 없는 항목에 D-day를 붙이면 거짓말이 된다.
+      node.append(
+        el('span', 'dday posted',
+          a.postedAt
+            ? new Date(a.postedAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+            : '—'
+        )
+      );
+    } else {
+      const d = ddayInfo(a.dueAt, now);
+      node.append(el('span', `dday ${d.tone}`, d.label));
+    }
 
     const mid = el('div');
     mid.append(el('div', 't', a.title));
@@ -416,14 +502,12 @@ class Board {
     dot.style.background = courseColor(a.courseName);
     meta.append(dot, el('span', null, a.courseName), el('span', 'tag', TYPE_LABEL[a.type] || a.type));
 
-    if (a.dueAt) {
-      meta.append(
-        el('span', null,
-          new Date(a.dueAt).toLocaleString('ko-KR', {
-            month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
-          })
-        )
-      );
+    const when = a.kind === 'resource' ? a.postedAt : a.dueAt;
+    if (when) {
+      const stamp = new Date(when).toLocaleString('ko-KR', {
+        month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+      });
+      meta.append(el('span', null, a.kind === 'resource' ? `${stamp} 올라옴` : stamp));
     }
     if (a.submitted) meta.append(el('span', 'tag ok', '제출완료'));
 
@@ -433,9 +517,10 @@ class Board {
   }
 
   exportICS() {
-    const list = this.visible().filter((a) => a.dueAt && !a.submitted);
+    // 자료 탭을 보고 있어도 캘린더에는 마감이 있는 과제만 넣는다.
+    const list = this.matching().filter((a) => a.kind === 'task' && a.dueAt && !a.submitted);
     if (!list.length) {
-      this.status.textContent = '내보낼 과제가 없습니다';
+      this.status.textContent = '캘린더에 넣을 과제가 없습니다';
       return;
     }
 

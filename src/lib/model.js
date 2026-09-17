@@ -5,10 +5,28 @@ export const TYPE_LABEL = {
   quiz: '퀴즈',
   exam: '시험',
   discussion: '토론',
-  video: '강의영상',
   attendance: '출석',
+  video: '강의영상',
+  material: '강의자료',
+  notice: '공지',
+  event: '일정',
   other: '기타',
 };
+
+/** 내가 "해야 하는" 것들. 마감일이 붙지 않아도 할 일로 본다. */
+export const TASK_TYPES = new Set(['assignment', 'quiz', 'exam', 'discussion', 'attendance']);
+
+/**
+ * 할 일(task)인지, 읽고 받아두는 자료(resource)인지.
+ *
+ * 공지나 강의자료에는 마감일이 없다. 그런데 LMS는 "올라온 날짜"를 함께 주기 때문에,
+ * 그걸 마감일로 오해하면 자료가 전부 "며칠 지남"으로 둔갑한다. 그래서 종류를 나눈다.
+ */
+export function kindOf(item) {
+  if (TASK_TYPES.has(item.type)) return 'task';
+  if (item.dueAt) return 'task'; // 마감이 실제로 걸려 있으면 뭐든 할 일이다
+  return 'resource';
+}
 
 const MS_MIN = 60 * 1000;
 const MS_DAY = 24 * 60 * MS_MIN;
@@ -66,7 +84,7 @@ export function normalize(item, ctx = {}) {
   const dueAt = parseDue(item.dueAt ?? item.due_at ?? item.dueDate ?? null);
   const courseName = String(item.courseName ?? ctx.courseName ?? '(과목 미상)').trim();
 
-  return {
+  const shaped = {
     id: String(item.id ?? `${courseName}:${item.title}:${dueAt}`),
     source: item.source ?? ctx.source ?? 'unknown',
     courseId: item.courseId != null ? String(item.courseId) : (ctx.courseId != null ? String(ctx.courseId) : ''),
@@ -74,12 +92,17 @@ export function normalize(item, ctx = {}) {
     title: String(item.title ?? '(제목 없음)').trim(),
     type: TYPE_LABEL[item.type] ? item.type : 'other',
     dueAt,
+    // 마감일이 아니라 "올라온 날짜". 둘을 절대 섞지 않는다.
+    postedAt: parseDue(item.postedAt ?? item.posted_at ?? item.created_at ?? null),
     startAt: parseDue(item.startAt ?? item.unlock_at ?? null),
     url: item.url ? String(item.url) : '',
     submitted: typeof item.submitted === 'boolean' ? item.submitted : null,
     points: item.points ?? null,
     note: item.note ? String(item.note) : '',
   };
+
+  shaped.kind = kindOf(shaped);
+  return shaped;
 }
 
 /** 같은 과제가 여러 엔드포인트에서 중복으로 잡히는 걸 걸러낸다. */
@@ -150,6 +173,16 @@ export function bucketOf(item, now = Date.now()) {
   if (days === 1) return 'tomorrow';
   if (days <= 7) return 'week';
   return 'later';
+}
+
+/** 자료·공지는 최신순. 올라온 날짜가 없으면 뒤로. */
+export function sortByPosted(list) {
+  return [...list].sort((a, b) => {
+    const at = a.postedAt ? new Date(a.postedAt).getTime() : -Infinity;
+    const bt = b.postedAt ? new Date(b.postedAt).getTime() : -Infinity;
+    if (at === bt) return a.courseName.localeCompare(b.courseName, 'ko');
+    return bt - at;
+  });
 }
 
 /** 마감 빠른 순. 기한 없는 항목은 항상 맨 뒤. */

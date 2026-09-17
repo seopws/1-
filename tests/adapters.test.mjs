@@ -85,6 +85,55 @@ test('canvas 어댑터: planner / todo / 과목별 과제를 합쳐서 정규화
   assert.equal(quiz.type, 'quiz');
 });
 
+test('canvas 어댑터: 공지와 강의자료를 과제와 구분한다', async () => {
+  stubFetch({
+    '/api/v1/users/self': { id: 1, name: '학생' },
+    '/api/v1/courses': [{ id: 201, name: '논리회로 01분반' }],
+    '/api/v1/planner/items': [
+      {
+        // 실제로 걸렸던 함정: 공지에는 due_at이 없고 plannable_date는 "올라온 날짜"다.
+        course_id: 201,
+        plannable_type: 'announcement',
+        html_url: '/courses/201/discussion_topics/11',
+        plannable_date: '2026-09-07T05:54:00Z',
+        plannable: { id: 11, title: '1_digital_systems_part3', posted_at: '2026-09-07T05:54:00Z' },
+      },
+      {
+        course_id: 201,
+        plannable_type: 'wiki_page',
+        html_url: '/courses/201/pages/syllabus',
+        plannable_date: '2026-09-02T01:00:00Z',
+        plannable: { id: 12, title: '강의계획서' },
+      },
+      {
+        course_id: 201,
+        plannable_type: 'assignment',
+        html_url: '/courses/201/assignments/13',
+        submissions: { submitted: false },
+        plannable: { id: 13, title: '3주차 과제', due_at: '2026-09-20T14:59:00Z' },
+      },
+    ],
+    '/api/v1/users/self/todo': [],
+    '/api/v1/courses/201/assignments': [],
+  });
+
+  const items = dedupe(await canvasAdapter.fetchAll(ORIGIN, { lookAheadDays: 60, lookBackDays: 14 }));
+  const byTitle = Object.fromEntries(items.map((a) => [a.title, a]));
+
+  const notice = byTitle['1_digital_systems_part3'];
+  assert.equal(notice.type, 'notice');
+  assert.equal(notice.kind, 'resource');
+  assert.equal(notice.dueAt, null, '올라온 날짜가 마감일로 새어들면 안 된다');
+  assert.equal(notice.postedAt, '2026-09-07T05:54:00.000Z');
+
+  assert.equal(byTitle['강의계획서'].type, 'material');
+  assert.equal(byTitle['강의계획서'].kind, 'resource');
+
+  const task = byTitle['3주차 과제'];
+  assert.equal(task.kind, 'task');
+  assert.equal(task.dueAt, '2026-09-20T14:59:00.000Z');
+});
+
 test('canvas 어댑터: Canvas API가 없는 사이트는 detect가 false', async () => {
   stubFetch({});
   assert.equal(await canvasAdapter.detect(ORIGIN), false);

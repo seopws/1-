@@ -155,8 +155,14 @@ async function testAdapter(adapterId) {
 
 async function updateBadge(assignments) {
   const now = Date.now();
+  // 공지·강의자료는 마감이 없다. 뱃지 숫자에 섞이면 안 된다.
   const soon = assignments.filter(
-    (a) => a.dueAt && !a.submitted && new Date(a.dueAt).getTime() >= now && ddayInfo(a.dueAt, now).days <= 3
+    (a) =>
+      a.kind === 'task' &&
+      a.dueAt &&
+      !a.submitted &&
+      new Date(a.dueAt).getTime() >= now &&
+      ddayInfo(a.dueAt, now).days <= 3
   ).length;
 
   await chrome.action.setBadgeText({ text: soon ? String(soon) : '' });
@@ -174,7 +180,7 @@ async function checkNotifications() {
   let changed = false;
 
   for (const a of assignments) {
-    if (!a.dueAt || a.submitted) continue;
+    if (a.kind !== 'task' || !a.dueAt || a.submitted) continue;
     const minutesLeft = (new Date(a.dueAt).getTime() - now) / 60000;
     if (minutesLeft < 0) continue;
 

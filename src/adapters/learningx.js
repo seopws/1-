@@ -26,6 +26,8 @@ const COURSE_ACTIVITY_CANDIDATES = [
 
 function typeFromLearningX(item) {
   const t = String(item.component_type || item.activity_type || item.type || '').toLowerCase();
+  if (t.includes('notice') || t.includes('announce')) return 'notice';
+  if (t.includes('material') || t.includes('file') || t.includes('attach')) return 'material';
   if (t.includes('quiz') || t.includes('exam')) return t.includes('exam') ? 'exam' : 'quiz';
   if (t.includes('assign') || t.includes('homework')) return 'assignment';
   if (t.includes('discussion') || t.includes('board')) return 'discussion';
@@ -65,6 +67,7 @@ function toAssignment(raw, origin, courseNames) {
       title,
       type: typeFromLearningX(raw),
       dueAt,
+      postedAt: raw.posted_at ?? raw.created_at ?? raw.reg_date ?? null,
       startAt: raw.start_at ?? raw.unlock_at ?? raw.open_at ?? null,
       url: raw.html_url ? joinUrl(origin, raw.html_url) : courseId ? joinUrl(origin, `/courses/${courseId}`) : '',
       submitted:

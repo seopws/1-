@@ -25,7 +25,8 @@ async function load() {
 
 function visible() {
   const now = Date.now();
-  let list = state.assignments;
+  // 팝업은 좁다. 공지·강의자료는 빼고 해야 할 것만 보여준다. (전체는 대시보드에서)
+  let list = state.assignments.filter((a) => a.kind === 'task');
 
   if (state.settings?.hideSubmitted) list = list.filter((a) => !a.submitted);
 

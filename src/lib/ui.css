@@ -46,6 +46,9 @@
 
 * { box-sizing: border-box; }
 
+/* display를 직접 지정한 요소는 hidden 속성만으로 안 숨는다. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',

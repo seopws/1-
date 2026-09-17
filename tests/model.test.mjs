@@ -124,3 +124,33 @@ test('기본 설정: 중앙대 e-Class로 바로 쓸 수 있게 고정되어 있
     '기본 origin은 manifest host_permissions에 선언되어 있어야 한다'
   );
 });
+
+test('공지·강의자료는 올라온 날짜를 마감일로 쓰지 않는다', async () => {
+  const { kindOf } = await import('../src/lib/model.js');
+
+  const notice = normalize({
+    title: '반장 선임.', type: 'notice', courseName: '미분적분학(2)',
+    dueAt: null, postedAt: '2026-09-11T02:14:00Z',
+  });
+  assert.equal(notice.dueAt, null, '공지에 마감일이 생기면 안 된다');
+  assert.equal(notice.postedAt, '2026-09-11T02:14:00.000Z');
+  assert.equal(notice.kind, 'resource');
+
+  const material = normalize({ title: '1_digital_systems_part3', type: 'material', postedAt: '2026-09-07T05:54:00Z' });
+  assert.equal(material.kind, 'resource');
+
+  // 마감이 실제로 걸린 자료라면 할 일로 본다.
+  assert.equal(kindOf({ type: 'material', dueAt: '2026-09-20T14:59:00Z' }), 'task');
+  // 마감일이 없는 과제도 여전히 할 일이다.
+  assert.equal(kindOf({ type: 'assignment', dueAt: null }), 'task');
+});
+
+test('sortByPosted: 최근에 올라온 것부터', async () => {
+  const { sortByPosted } = await import('../src/lib/model.js');
+  const list = [
+    normalize({ title: '오래된 것', type: 'notice', postedAt: '2026-09-01T00:00:00Z' }),
+    normalize({ title: '날짜 없음', type: 'notice' }),
+    normalize({ title: '최근 것', type: 'notice', postedAt: '2026-09-15T00:00:00Z' }),
+  ];
+  assert.deepEqual(sortByPosted(list).map((a) => a.title), ['최근 것', '오래된 것', '날짜 없음']);
+});

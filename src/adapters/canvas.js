@@ -7,16 +7,31 @@ import { normalize } from '../lib/model.js';
 
 const SOURCE = 'canvas';
 
-function typeFromCanvas(item) {
-  const t = String(
-    item.plannable_type || item.type || item.submission_types?.[0] || ''
-  ).toLowerCase();
+/**
+ * @param fallback 엔드포인트가 이미 종류를 보장할 때 쓰는 기본값.
+ *   /courses/:id/assignments 로 받은 항목은 필드가 뭐든 과제다. 추측할 필요가 없다.
+ */
+function typeFromCanvas(item, fallback = 'other') {
+  const t = String(item.plannable_type || item.type || '').toLowerCase();
+
+  // 공지·페이지·일정을 과제와 같은 칸에 넣으면 목록이 못 쓰게 된다. 먼저 걸러낸다.
+  if (t.includes('announcement')) return 'notice';
+  if (t.includes('wiki') || t.includes('page')) return 'material';
+  if (t.includes('calendar_event') || t === 'event') return 'event';
+
   if (t.includes('quiz')) return 'quiz';
   if (t.includes('discussion')) return 'discussion';
   if (t.includes('assignment')) return 'assignment';
   if (t.includes('attendance')) return 'attendance';
   if (t.includes('media') || t.includes('video')) return 'video';
-  return 'other';
+
+  // submission_types 는 assignment 안에서만 의미가 있다.
+  const submission = String(item.submission_types?.[0] || '').toLowerCase();
+  if (submission.includes('quiz')) return 'quiz';
+  if (submission.includes('discussion')) return 'discussion';
+  if (submission) return 'assignment';
+
+  return fallback;
 }
 
 /** 수강 중인 과목 목록. id → 이름 매핑을 만든다. */
@@ -59,7 +74,10 @@ async function fromPlanner(origin, courseNames, { signal, lookBackDays, lookAhea
           courseName: courseNames.get(String(it.course_id)) || it.context_name,
           title: p.title || p.name,
           type: typeFromCanvas(it),
-          dueAt: p.due_at || p.todo_date || it.plannable_date,
+          // plannable_date 로 폴백하면 안 된다. 공지에서는 그게 "올라온 날짜"라서,
+          // 지난주에 올라온 강의자료가 전부 "마감 지남"으로 둔갑한다.
+          dueAt: p.due_at || p.todo_date || null,
+          postedAt: p.posted_at || p.created_at || it.plannable_date || null,
           url: it.html_url ? joinUrl(origin, it.html_url) : '',
           submitted: it.submissions ? Boolean(it.submissions.submitted) : null,
           points: p.points_possible ?? null,
@@ -82,8 +100,9 @@ async function fromTodo(origin, courseNames, { signal }) {
         courseId: it.course_id ?? a.course_id,
         courseName: courseNames.get(String(it.course_id ?? a.course_id)) || it.context_name,
         title: a.name || it.type,
-        type: typeFromCanvas(a),
+        type: typeFromCanvas(a, 'assignment'),
         dueAt: a.due_at,
+        postedAt: a.created_at || null,
         url: it.html_url ? joinUrl(origin, it.html_url) : '',
         submitted: false,
         points: a.points_possible ?? null,
@@ -123,8 +142,9 @@ async function fromCourseAssignments(origin, courseNames, { signal }) {
             courseId,
             courseName: courseNames.get(courseId),
             title: a.name,
-            type: typeFromCanvas(a),
+            type: typeFromCanvas(a, 'assignment'),
             dueAt: a.due_at,
+            postedAt: a.created_at || null,
             startAt: a.unlock_at,
             url: a.html_url ? joinUrl(origin, a.html_url) : '',
             submitted: a.submission

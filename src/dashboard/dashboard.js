@@ -1,8 +1,9 @@
-import { ddayInfo, bucketOf, BUCKETS, TYPE_LABEL, sortByDue } from '../lib/model.js';
+import { ddayInfo, bucketOf, BUCKETS, TYPE_LABEL, sortByDue, sortByPosted } from '../lib/model.js';
 import { downloadICS } from '../lib/ics.js';
 
 const $ = (id) => document.getElementById(id);
 let state = { assignments: [], lastSync: null, lastError: null, settings: null };
+let view = 'task'; // 'task' = 해야 할 것, 'resource' = 공지·강의자료
 
 function send(type, extra = {}) {
   return chrome.runtime.sendMessage({ type, ...extra }).then((r) => {
@@ -53,23 +54,27 @@ function fillSelects() {
   $('type').value = types.includes(keepType) ? keepType : '';
 }
 
-function filtered() {
+/** 탭과 무관하게 검색·과목·유형 필터만 적용한 목록. 탭 숫자를 세는 데도 쓴다. */
+function matching() {
   const q = $('search').value.trim().toLowerCase();
   const course = $('course').value;
   const type = $('type').value;
   const hideSubmitted = $('hideSubmitted').checked;
   const hideNoDue = $('hideNoDue').checked;
 
-  return sortByDue(
-    state.assignments.filter((a) => {
-      if (hideSubmitted && a.submitted) return false;
-      if (hideNoDue && !a.dueAt) return false;
-      if (course && a.courseName !== course) return false;
-      if (type && a.type !== type) return false;
-      if (q && !`${a.title} ${a.courseName}`.toLowerCase().includes(q)) return false;
-      return true;
-    })
-  );
+  return state.assignments.filter((a) => {
+    if (hideSubmitted && a.submitted) return false;
+    if (hideNoDue && a.kind === 'task' && !a.dueAt) return false;
+    if (course && a.courseName !== course) return false;
+    if (type && a.type !== type) return false;
+    if (q && !`${a.title} ${a.courseName}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function filtered() {
+  const list = matching().filter((a) => a.kind === view);
+  return view === 'task' ? sortByDue(list) : sortByPosted(list);
 }
 
 function render() {
@@ -82,8 +87,19 @@ function render() {
     ? `마지막 동기화 ${new Date(state.lastSync.at).toLocaleString('ko-KR')} · ${state.lastSync.adapter} 어댑터 · 총 ${state.assignments.length}개`
     : '아직 동기화하지 않았습니다. 오른쪽 위 새로고침을 눌러주세요.';
 
+  const pool = matching();
+  for (const btn of $('seg').querySelectorAll('button')) {
+    btn.setAttribute('aria-selected', String(btn.dataset.view === view));
+    btn.querySelector('.c').textContent = pool.filter((a) => a.kind === btn.dataset.view).length;
+  }
+
   const list = filtered();
-  renderStats(list, now);
+  const isTask = view === 'task';
+
+  // 자료에는 마감 통계도, 제출/기한 필터도 의미가 없다.
+  $('stats').hidden = !isTask;
+  for (const id of ['hideSubmitted', 'hideNoDue']) $(id).closest('.check').hidden = !isTask;
+  if (isTask) renderStats(list, now);
 
   const board = $('board');
   board.textContent = '';
@@ -92,22 +108,19 @@ function render() {
     const d = document.createElement('div');
     d.className = 'empty';
     d.textContent = state.assignments.length
-      ? '조건에 맞는 과제가 없습니다.'
-      : '아직 불러온 과제가 없습니다. 설정에서 LMS 주소를 확인한 뒤 새로고침해 주세요.';
+      ? '조건에 맞는 항목이 없습니다.'
+      : '아직 불러온 항목이 없습니다. 설정에서 LMS 주소를 확인한 뒤 새로고침해 주세요.';
     board.append(d);
     return;
   }
 
-  const grouped = new Map();
-  for (const a of list) {
-    const k = bucketOf(a, now);
-    if (!grouped.has(k)) grouped.set(k, []);
-    grouped.get(k).push(a);
-  }
+  // 마감이 있는 것만 마감 구간으로 묶는다. 자료는 최근 올라온 순 한 덩어리.
+  const groups = isTask
+    ? BUCKETS.map(({ key, label }) => [label, list.filter((a) => bucketOf(a, now) === key)])
+    : [['최근 올라온 순', list]];
 
-  for (const { key, label } of BUCKETS) {
-    const items = grouped.get(key);
-    if (!items?.length) continue;
+  for (const [label, items] of groups) {
+    if (!items.length) continue;
 
     const section = document.createElement('section');
     section.className = 'group';
@@ -130,7 +143,7 @@ function render() {
 
 function renderStats(list, now) {
   const count = (fn) => list.filter(fn).length;
-  const active = (a) => !a.submitted && a.dueAt;
+  const active = (a) => a.kind === 'task' && !a.submitted && a.dueAt;
 
   const stats = [
     { k: '지난 마감', n: count((a) => active(a) && bucketOf(a, now) === 'overdue'), cls: 'overdue' },
@@ -156,7 +169,6 @@ function renderStats(list, now) {
 }
 
 function rowNode(a, now) {
-  const d = ddayInfo(a.dueAt, now);
   const node = document.createElement(a.url ? 'a' : 'div');
   node.className = `row${a.submitted ? ' done' : ''}`;
   if (a.url) {
@@ -165,9 +177,18 @@ function rowNode(a, now) {
     node.rel = 'noopener';
   }
 
+  // 마감이 없는 자료에 D-day를 붙이면 거짓말이 된다. 올라온 날짜를 보여준다.
   const badge = document.createElement('span');
-  badge.className = `dday ${d.tone}`;
-  badge.textContent = d.label;
+  if (a.kind === 'resource') {
+    badge.className = 'dday posted';
+    badge.textContent = a.postedAt
+      ? new Date(a.postedAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+      : '—';
+  } else {
+    const d = ddayInfo(a.dueAt, now);
+    badge.className = `dday ${d.tone}`;
+    badge.textContent = d.label;
+  }
 
   const mid = document.createElement('div');
   const title = document.createElement('div');
@@ -200,11 +221,12 @@ function rowNode(a, now) {
 
   const when = document.createElement('div');
   when.className = 'when';
-  when.textContent = a.dueAt
-    ? new Date(a.dueAt).toLocaleString('ko-KR', {
+  const stamp = a.kind === 'resource' ? a.postedAt : a.dueAt;
+  when.textContent = stamp
+    ? new Date(stamp).toLocaleString('ko-KR', {
         month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
-      })
-    : '기한 없음';
+      }) + (a.kind === 'resource' ? ' 올라옴' : '')
+    : a.kind === 'resource' ? '날짜 모름' : '기한 없음';
 
   node.append(badge, mid, when);
   return node;
@@ -226,9 +248,10 @@ $('refresh').addEventListener('click', async (e) => {
 });
 
 $('export').addEventListener('click', () => {
-  const list = filtered().filter((a) => a.dueAt && !a.submitted);
+  // 자료 탭을 보고 있어도 캘린더에는 마감이 있는 과제만 넣는다.
+  const list = matching().filter((a) => a.kind === 'task' && a.dueAt && !a.submitted);
   if (!list.length) {
-    alert('내보낼 과제가 없습니다.');
+    alert('캘린더에 넣을 과제가 없습니다.');
     return;
   }
   downloadICS(list, `과제마감일_${new Date().toISOString().slice(0, 10)}.ics`);
@@ -239,6 +262,13 @@ $('options').addEventListener('click', () => chrome.runtime.openOptionsPage());
 for (const id of ['search', 'course', 'type', 'hideNoDue']) {
   $(id).addEventListener('input', render);
 }
+
+$('seg').addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-view]');
+  if (!button) return;
+  view = button.dataset.view;
+  render();
+});
 $('hideSubmitted').addEventListener('change', async (e) => {
   await send('saveSettings', { patch: { hideSubmitted: e.target.checked } });
   render();

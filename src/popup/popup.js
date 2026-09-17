@@ -113,7 +113,8 @@ function itemNode(a, now) {
   const due = a.dueAt
     ? new Date(a.dueAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '기한 없음';
-  meta.textContent = `${a.courseName} · ${TYPE_LABEL[a.type]} · ${due}${a.submitted ? ' · 제출완료' : ''}`;
+  const doneLabel = a.type === 'video' ? ' · 시청완료' : ' · 제출완료';
+  meta.textContent = `${a.courseName} · ${TYPE_LABEL[a.type]} · ${due}${a.submitted ? doneLabel : ''}`;
 
   body.append(title, meta);
   node.append(badge, body);

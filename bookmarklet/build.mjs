@@ -85,6 +85,7 @@ const ref = (() => {
 })();
 
 let loader = null;
+let shortcut = null;
 
 if (ref) {
   // 로더가 낡은 코드를 가리키면 조용히 옛날 동작을 하게 된다. 그게 제일 고약하다.
@@ -116,6 +117,19 @@ if (ref) {
         `(document.body||document.documentElement).appendChild(s)})();`
     );
     await writeFile(new URL('./loader.txt', OUT_DIR), loader);
+
+    // iOS 단축어의 "웹 페이지에서 JavaScript 실행" 액션용.
+    // javascript: 접두사도 URL 인코딩도 없는 순수 JS여야 하고, completion() 을 반드시 불러야
+    // 단축어가 끝나지 않고 멈춘다.
+    shortcut = [
+      "var s = document.createElement('script');",
+      `s.src = ${JSON.stringify(src)};`,
+      's.onload = function () { s.remove(); };',
+      "s.onerror = function () { alert('과제 한눈에: 코드를 불러오지 못했습니다.'); };",
+      '(document.body || document.documentElement).appendChild(s);',
+      'completion();',
+    ].join('\n');
+    await writeFile(new URL('./shortcut.js', OUT_DIR), shortcut + '\n');
   }
 }
 
@@ -129,7 +143,7 @@ const template = await readFile(new URL('./src/install.template.html', import.me
 const escapeHtml = (text) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-for (const key of ['__BOOKMARKLET__', '__LOADER__']) {
+for (const key of ['__BOOKMARKLET__', '__LOADER__', '__SHORTCUT__']) {
   if (!template.includes(key)) {
     console.error(`⚠ 템플릿에 ${key} 자리표시자가 없습니다.`);
     process.exit(1);
@@ -140,6 +154,7 @@ await writeFile(
   new URL('./install.html', OUT_DIR),
   template
     .replace('__LOADER__', escapeHtml(loader || bookmarklet))
+    .replace('__SHORTCUT__', escapeHtml(shortcut || '(로더를 먼저 만들어야 합니다)'))
     .replace('__BOOKMARKLET__', escapeHtml(bookmarklet))
 );
 

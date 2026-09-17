@@ -13,8 +13,13 @@ export const TYPE_LABEL = {
   other: '기타',
 };
 
-/** 내가 "해야 하는" 것들. 마감일이 붙지 않아도 할 일로 본다. */
-export const TASK_TYPES = new Set(['assignment', 'quiz', 'exam', 'discussion', 'attendance']);
+/**
+ * 내가 "해야 하는" 것들. 마감일이 붙지 않아도 할 일로 본다.
+ * 강의영상은 시청 기한이 안 적혀 있어도 들어야 하는 것이므로 여기에 넣는다.
+ */
+export const TASK_TYPES = new Set([
+  'assignment', 'quiz', 'exam', 'discussion', 'attendance', 'video',
+]);
 
 /**
  * 할 일(task)인지, 읽고 받아두는 자료(resource)인지.

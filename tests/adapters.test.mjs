@@ -187,3 +187,37 @@ test('custom 어댑터: 설정이 비어 있으면 무엇을 채워야 하는지
     /과제 목록 URL/
   );
 });
+
+test('learningx 어댑터: 감싸인 응답에서도 강의영상을 찾아낸다', async () => {
+  const { learningxAdapter } = await import('../src/adapters/learningx.js');
+
+  stubFetch({
+    '/api/v1/users/self': { id: 1, name: '학생' },
+    '/api/v1/courses': [{ id: 101, name: '운영체제' }],
+    '/api/v1/planner/items': [],
+    '/api/v1/users/self/todo': [],
+    '/api/v1/courses/101/assignments': [
+      { id: 1, name: '3주차 보고서', due_at: '2026-09-20T14:59:00Z', html_url: '/courses/101/assignments/1' },
+    ],
+    // 한국 LMS가 흔히 쓰는 {result:{items:[…]}} 래핑. 예전엔 여기서 배열을 못 찾았다.
+    '/learningx/api/v1/courses/101/activities': {
+      result: {
+        items: [
+          { id: 301, component_type: 'vod', title: '3주차 강의영상 1', due_at: '2026-09-19T14:59:00Z', progress_rate: 0 },
+          { id: 302, component_type: 'vod', title: '3주차 강의영상 2', due_at: null, progress_rate: 100 },
+        ],
+      },
+    },
+  });
+
+  const items = dedupe(await learningxAdapter.fetchAll(ORIGIN, { lookAheadDays: 60, lookBackDays: 14, settings: {} }));
+  const videos = items.filter((a) => a.type === 'video');
+
+  assert.equal(videos.length, 2, '감싸인 응답에서도 영상 두 개를 다 찾아야 한다');
+  assert.ok(videos.every((v) => v.kind === 'task'), '들어야 할 영상은 할 일이다');
+
+  const watched = videos.find((v) => v.title === '3주차 강의영상 2');
+  assert.equal(watched.submitted, true, '진행률 100%는 시청 완료로 읽어야 한다');
+  assert.equal(watched.dueAt, null);
+  assert.ok(items.some((a) => a.title === '3주차 보고서'), 'Canvas 쪽 과제도 그대로 유지되어야 한다');
+});

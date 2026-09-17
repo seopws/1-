@@ -6,7 +6,9 @@
 //
 // 어댑터·날짜 계산·ics 생성은 확장과 같은 모듈을 그대로 쓴다. 화면만 새로 그린다.
 
-import { canvasAdapter } from '../../src/adapters/canvas.js';
+import { learningxAdapter } from '../../src/adapters/learningx.js';
+import { fetchCourses } from '../../src/adapters/canvas.js';
+import { getJSON, joinUrl, tryOr } from '../../src/lib/http.js';
 import {
   dedupe, sortByDue, sortByPosted, ddayInfo, bucketOf, BUCKETS, TYPE_LABEL,
 } from '../../src/lib/model.js';
@@ -116,6 +118,10 @@ main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 
 footer { display: flex; gap: 8px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom)); border-top: 1px solid #e4e7ec; background: #fff; }
 footer button { flex: 1; }
 
+.probe { padding: 14px 0 20px; }
+.probe pre { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; background: #fff; border: 1px solid #e4e7ec; border-radius: 10px; padding: 12px; max-height: 46vh; overflow: auto; }
+.probe-actions { display: flex; gap: 8px; margin-top: 12px; }
+.probe-actions button { flex: 1; }
 .msg { padding: 44px 24px; text-align: center; color: #667085; font-size: 14px; line-height: 1.7; }
 .msg strong { color: #101828; display: block; margin-bottom: 6px; font-size: 15px; }
 .msg .cta {
@@ -134,6 +140,7 @@ footer button { flex: 1; }
   .row { border-top-color: #24282e; }
   .glabel, .stat .k, .row .m, .toggle, .msg { color: #98a2b3; }
   .glabel .n, .tag { background: #24282e; color: #98a2b3; }
+  .probe pre { background: #1c1f24; border-color: #2f343b; color: #cfd4dc; }
   .msg strong { color: #e7eaee; }
   .msg .cta { background: #a4bcfd; color: #14161a; }
   .dday.overdue { color: #fda29b; background: #3a1c19; }
@@ -147,6 +154,19 @@ footer button { flex: 1; }
   .tag.ok { background: #12283a; color: #7cd4fd; }
 }
 `;
+
+/** 응답 어디에 배열이 들어있든 찾아낸다. 진단 표시용. */
+function pickArray(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  for (const key of ['items', 'data', 'results', 'list', 'todo_items', 'activities', 'modules']) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+  for (const value of Object.values(data)) {
+    if (Array.isArray(value) && value.length) return value;
+  }
+  return [data];
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -207,11 +227,15 @@ class Board {
     refresh.title = '새로고침';
     refresh.addEventListener('click', () => this.load());
 
+    const probe = el('button', 'icon', '⋯');
+    probe.title = '진단';
+    probe.addEventListener('click', () => this.runProbe());
+
     const close = el('button', 'icon', '✕');
     close.title = '닫기';
     close.addEventListener('click', () => this.close());
 
-    header.append(titleBox, refresh, close);
+    header.append(titleBox, probe, refresh, close);
 
     this.body = el('main');
     this.sheet.append(header, this.body);
@@ -252,7 +276,8 @@ class Board {
     this.status.textContent = '동기화 중…';
 
     try {
-      const raw = await canvasAdapter.fetchAll(location.origin, {
+      // LearningX 어댑터는 Canvas 표준 API에 더해 주차별 강의영상 같은 자체 항목까지 긁는다.
+      const raw = await learningxAdapter.fetchAll(location.origin, {
         lookAheadDays: LOOK_AHEAD_DAYS,
         lookBackDays: LOOK_BACK_DAYS,
         settings: {},
@@ -384,6 +409,89 @@ class Board {
     return this.matching().filter((a) => a.kind === this.view);
   }
 
+  /**
+   * 어느 엔드포인트가 살아있는지 훑어본다.
+   * LearningX 경로는 학교·버전마다 달라서, 영상이 안 잡힐 때 여기서 실제 이름을 확인한다.
+   */
+  async runProbe() {
+    if (this.seg) this.seg.hidden = true;
+    if (this.tools) this.tools.hidden = true;
+    if (this.stats) this.stats.hidden = true;
+    this.showLoading();
+    this.status.textContent = '엔드포인트 확인 중…';
+
+    const origin = location.origin;
+    const courses = await tryOr(() => fetchCourses(origin, undefined), new Map());
+    const courseId = [...(courses || new Map()).keys()][0];
+
+    const paths = [
+      '/api/v1/users/self',
+      '/api/v1/courses?enrollment_state=active&per_page=100',
+      '/api/v1/planner/items?per_page=10',
+      '/api/v1/users/self/todo',
+      '/learningx/api/v1/users/self/todo_items',
+      '/learningx/api/v1/users/self/todos',
+      '/learningx/api/v1/dashboard/todo',
+    ];
+    if (courseId) {
+      paths.push(
+        `/api/v1/courses/${courseId}/assignments?per_page=5`,
+        `/api/v1/courses/${courseId}/modules?include[]=items&per_page=5`,
+        `/learningx/api/v1/courses/${courseId}/activities`,
+        `/learningx/api/v1/courses/${courseId}/learning_activities`,
+        `/learningx/api/v1/courses/${courseId}/modules/items`,
+        `/learningx/api/v1/courses/${courseId}/course_modules`,
+        `/learningx/api/v1/courses/${courseId}/attendance/items`,
+        `/learningx/api/v1/courses/${courseId}/progress/commons`
+      );
+    }
+
+    const lines = [`과목 ${courses ? courses.size : 0}개 · 기준 과목 ${courseId || '없음'}`];
+    for (const path of paths) {
+      const res = await tryOr(() => getJSON(joinUrl(origin, path)), null);
+      if (!res) {
+        lines.push(`✗ ${path}`);
+        continue;
+      }
+      const list = pickArray(res.data);
+      const keys = list.length && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 12) : [];
+      lines.push(`✓ ${path} — ${list.length}개${keys.length ? ` · ${keys.join(', ')}` : ''}`);
+    }
+
+    this.renderProbe(lines.join('\n'));
+  }
+
+  renderProbe(text) {
+    this.status.textContent = '진단 결과';
+    this.body.textContent = '';
+
+    const box = el('div', 'probe');
+    const pre = el('pre', null, text);
+    box.append(pre);
+
+    const copy = el('button', 'primary', '결과 복사');
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.textContent = '복사했습니다';
+      } catch {
+        copy.textContent = '복사 실패 — 위 내용을 길게 눌러 복사하세요';
+      }
+    });
+
+    const back = el('button', null, '목록으로');
+    back.addEventListener('click', () => {
+      if (this.seg) this.seg.hidden = false;
+      if (this.tools) this.tools.hidden = false;
+      this.render();
+    });
+
+    const actions = el('div', 'probe-actions');
+    actions.append(copy, back);
+    box.append(actions);
+    this.body.append(box);
+  }
+
   render() {
     const now = Date.now();
     const matching = this.matching();
@@ -509,7 +617,8 @@ class Board {
       });
       meta.append(el('span', null, a.kind === 'resource' ? `${stamp} 올라옴` : stamp));
     }
-    if (a.submitted) meta.append(el('span', 'tag ok', '제출완료'));
+    // 영상은 제출하는 게 아니라 보는 것이다.
+    if (a.submitted) meta.append(el('span', 'tag ok', a.type === 'video' ? '시청완료' : '제출완료'));
 
     mid.append(meta);
     node.append(mid);

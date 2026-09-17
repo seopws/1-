@@ -173,6 +173,14 @@
   .fallback[open] summary::before { content: '−'; }
   .fallback summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
   .fallback-why { margin: 12px 0 13px; font-size: 13.5px; color: var(--ink-dim); }
+
+  .inline-h2 { text-transform: none; font-size: 15px; color: var(--ink); letter-spacing: 0; margin-bottom: 4px; }
+  .muted-h2 { color: var(--ink-dim); font-weight: 400; }
+  ol.steps.compact li { padding: 12px 0; grid-template-columns: 26px 1fr; gap: 12px; }
+  ol.steps.compact li::before { width: 26px; height: 26px; font-size: 12px; }
+  ol.steps.compact h3 { font-size: 14.5px; }
+  ol.steps.compact p { font-size: 13.5px; }
+  .action .payload + ol.steps { margin-top: 4px; }
   .fallback .payload { margin-top: 11px; }
 
   .copy-btn.ghost {
@@ -389,6 +397,59 @@
     </ol>
   </section>
 
+  <section class="action">
+    <h2 class="inline-h2">앱처럼 쓰기 <span class="muted-h2">(iOS 단축어)</span></h2>
+    <p class="fallback-why" style="margin-top: 0">
+      단축어로 만들면 e-Class에서 <kbd>공유</kbd> 한 번으로 열립니다. 홈 화면에 아이콘으로도 놓을 수 있어서,
+      북마크 목록을 뒤지지 않아도 됩니다. 붙여넣을 내용만 다르고 하는 일은 똑같습니다.
+    </p>
+
+    <button class="copy-btn ghost" id="copy-shortcut" type="button">단축어용 코드 복사하기</button>
+    <textarea
+      class="payload short"
+      id="payload-shortcut"
+      readonly
+      spellcheck="false"
+      aria-label="단축어용 코드"
+    >__SHORTCUT__</textarea>
+
+    <ol class="steps compact">
+      <li>
+        <div>
+          <h3>단축어 앱에서 새로 만들기</h3>
+          <p><kbd>단축어</kbd> 앱 → 오른쪽 위 <kbd>+</kbd> → <kbd>동작 추가</kbd></p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>동작 하나만 넣습니다</h3>
+          <p>
+            <strong>웹 페이지에서 JavaScript 실행</strong>을 검색해 추가하고,
+            그 안의 코드를 전부 지운 뒤 위에서 복사한 것을 붙여넣습니다.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>공유 시트에 올립니다</h3>
+          <p>
+            아래 정보 버튼 <kbd>ⓘ</kbd> → <kbd>공유 시트에 보기</kbd>를 켜고,
+            이름을 <strong>과제 한눈에</strong>로 저장합니다.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>e-Class에서 공유 → 과제 한눈에</h3>
+          <p>
+            홈 화면 아이콘으로 두고 싶다면, 단축어를 길게 눌러 <kbd>홈 화면에 추가</kbd>를 고르세요.
+            단, 실행은 e-Class 화면이 열려 있을 때 해야 합니다.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
   <section>
     <h2>안 될 때</h2>
     <div class="notes">
@@ -502,5 +563,6 @@
 
     wire('copy', 'payload', '북마클릿 복사하기');
     wire('copy-full', 'payload-full', '전체 버전 복사하기');
+    wire('copy-shortcut', 'payload-shortcut', '단축어용 코드 복사하기');
   })();
 </script>

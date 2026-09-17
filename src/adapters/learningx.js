@@ -11,6 +11,9 @@ import { canvasAdapter, fetchCourses } from './canvas.js';
 
 const SOURCE = 'learningx';
 
+// 마감일이 없어도 목록에 남길 만한 종류. 나머지 무명 항목은 노이즈라 버린다.
+const KEEP_WITHOUT_DUE = new Set(['video', 'assignment', 'quiz', 'exam', 'discussion', 'attendance']);
+
 // 학교마다 다를 수 있어 후보를 여러 개 두고 순서대로 시도한다.
 const TODO_CANDIDATES = [
   '/learningx/api/v1/users/self/todo_items',
@@ -22,6 +25,10 @@ const COURSE_ACTIVITY_CANDIDATES = [
   '/learningx/api/v1/courses/{courseId}/activities',
   '/learningx/api/v1/courses/{courseId}/learning_activities',
   '/learningx/api/v1/courses/{courseId}/modules/items',
+  // 주차별 강의영상은 보통 이쪽 계열에 있다. 학교/버전마다 이름이 다르다.
+  '/learningx/api/v1/courses/{courseId}/course_modules',
+  '/learningx/api/v1/courses/{courseId}/attendance/items',
+  '/learningx/api/v1/courses/{courseId}/progress/commons',
 ];
 
 function typeFromLearningX(item) {
@@ -31,23 +38,55 @@ function typeFromLearningX(item) {
   if (t.includes('quiz') || t.includes('exam')) return t.includes('exam') ? 'exam' : 'quiz';
   if (t.includes('assign') || t.includes('homework')) return 'assignment';
   if (t.includes('discussion') || t.includes('board')) return 'discussion';
-  if (t.includes('video') || t.includes('movie') || t.includes('commons')) return 'video';
+  if (
+    t.includes('video') || t.includes('movie') || t.includes('commons') ||
+    t.includes('vod') || t.includes('media') || t.includes('lecture')
+  ) {
+    return 'video';
+  }
   if (t.includes('attend')) return 'attendance';
   return 'other';
 }
 
-/** 응답 모양이 제각각이라, 배열처럼 생긴 걸 찾아서 꺼낸다. */
-function extractArray(data) {
+const ARRAY_KEYS = ['items', 'data', 'results', 'list', 'todo_items', 'activities', 'modules'];
+
+/**
+ * 응답 모양이 제각각이라 배열처럼 생긴 걸 찾아서 꺼낸다.
+ *
+ * {result:{items:[…]}} 처럼 한 겹 더 감싸는 API가 흔해서 재귀로 내려간다.
+ * 예전에는 한 단계만 봤고, 그 탓에 응답은 200인데 목록이 비는 일이 있었다.
+ */
+function extractArray(data, depth = 0) {
   if (Array.isArray(data)) return data;
-  if (!data || typeof data !== 'object') return [];
-  for (const key of ['items', 'data', 'results', 'list', 'todo_items', 'activities']) {
+  if (!data || typeof data !== 'object' || depth > 3) return [];
+
+  for (const key of ARRAY_KEYS) {
     if (Array.isArray(data[key])) return data[key];
   }
-  // 한 단계 더 들어가서 배열 아무거나.
-  for (const v of Object.values(data)) {
-    if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;
+
+  for (const value of Object.values(data)) {
+    if (Array.isArray(value) && value.length && typeof value[0] === 'object') return value;
   }
+
+  // 아직 못 찾았으면 한 겹 더 들어간다.
+  for (const value of Object.values(data)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const found = extractArray(value, depth + 1);
+      if (found.length) return found;
+    }
+  }
+
   return [];
+}
+
+/** 완료 여부. 영상은 시청 완료/진행률로 오는 경우가 많다. */
+function readDone(raw) {
+  for (const key of ['is_submitted', 'submitted', 'is_completed', 'completed', 'is_viewed']) {
+    if (typeof raw[key] === 'boolean') return raw[key];
+  }
+  const progress = raw.progress ?? raw.progress_rate ?? raw.view_rate;
+  if (typeof progress === 'number') return progress >= 100;
+  return null;
 }
 
 function toAssignment(raw, origin, courseNames) {
@@ -70,14 +109,7 @@ function toAssignment(raw, origin, courseNames) {
       postedAt: raw.posted_at ?? raw.created_at ?? raw.reg_date ?? null,
       startAt: raw.start_at ?? raw.unlock_at ?? raw.open_at ?? null,
       url: raw.html_url ? joinUrl(origin, raw.html_url) : courseId ? joinUrl(origin, `/courses/${courseId}`) : '',
-      submitted:
-        typeof raw.is_submitted === 'boolean'
-          ? raw.is_submitted
-          : typeof raw.submitted === 'boolean'
-            ? raw.submitted
-            : typeof raw.is_completed === 'boolean'
-              ? raw.is_completed
-              : null,
+      submitted: readDone(raw),
       points: raw.points ?? raw.points_possible ?? null,
     },
     { source: SOURCE }
@@ -136,7 +168,10 @@ export const learningxAdapter = {
         'LearningX API에서 과제를 찾지 못했습니다. docs/DISCOVERY.md를 보고 실제 엔드포인트를 확인한 뒤 "직접 지정" 어댑터에 넣어주세요.'
       );
     }
-    // 기한이 아예 없는 보조 항목은 노이즈가 커서 제외한다 (Canvas 소스는 유지).
-    return all.filter((a) => a.source !== SOURCE || a.dueAt);
+    // LearningX 보조 항목은 노이즈가 크다. 기한이 있거나 종류가 분명한 것만 남긴다.
+    // 강의영상은 시청 기한이 안 적혀 있어도 들어야 하므로 반드시 남긴다.
+    return all.filter(
+      (a) => a.source !== SOURCE || a.dueAt || KEEP_WITHOUT_DUE.has(a.type)
+    );
   },
 };

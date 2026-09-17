@@ -213,7 +213,8 @@ function rowNode(a, now) {
   if (a.submitted) {
     const done = document.createElement('span');
     done.className = 'tag done';
-    done.textContent = '제출완료';
+    // 영상은 제출하는 게 아니라 보는 것이다.
+    done.textContent = a.type === 'video' ? '시청완료' : '제출완료';
     sub.append(done);
   }
 

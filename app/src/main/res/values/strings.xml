@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GridHelper</string>
+    <string name="notification_channel">퍼즐 도우미 실행 상태</string>
+    <string name="notification_title_running">GridHelper 분석 중</string>
+    <string name="notification_title_paused">GridHelper 일시정지됨</string>
+    <string name="notification_text">게임 화면 위에 추천 배치를 표시합니다</string>
+    <string name="action_pause">일시정지</string>
+    <string name="action_resume">재개</string>
+    <string name="action_stop">종료</string>
+</resources>

@@ -57,8 +57,12 @@ class FrameAnalyzer(
 /**
  * 32 x 64 down-sampled luma signature of a frame, used to skip frames that did not change and
  * to require two identical consecutive frames before analysing (animations in progress produce
- * different signatures). The top and bottom bands are excluded: status bar, banner/debug text of
- * our own overlay and the navigation bar must not keep the signature changing.
+ * different signatures).
+ *
+ * Only a horizontal band is sampled: by default 10-92 % of the height (status bar, our own
+ * banner / debug text and the navigation bar are excluded). Once a board has been found, the
+ * caller narrows the band to board + tray so score effects and combo animations above the
+ * board do not prevent "two identical frames".
  */
 class FrameSignature private constructor(private val values: ByteArray) {
 
@@ -90,10 +94,12 @@ class FrameSignature private constructor(private val values: ByteArray) {
         const val TOP = 0.10f
         const val BOTTOM = 0.92f
 
-        fun of(src: PixelSource): FrameSignature {
+        /** [top] / [bottom] are fractions of the frame height delimiting the sampled band. */
+        fun of(src: PixelSource, top: Float = TOP, bottom: Float = BOTTOM): FrameSignature {
+            require(bottom > top) { "empty band" }
             val out = ByteArray(COLS * ROWS)
-            val y0 = src.height * TOP
-            val bandH = src.height * (BOTTOM - TOP)
+            val y0 = src.height * top.coerceIn(0f, 1f)
+            val bandH = src.height * (bottom.coerceIn(0f, 1f) - top.coerceIn(0f, 1f))
             val cw = src.width.toFloat() / COLS
             val ch = bandH / ROWS
             for (r in 0 until ROWS) {

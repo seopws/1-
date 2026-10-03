@@ -78,6 +78,8 @@ data class Scene(
     /** Tray slots drawn greyed out ("does not fit" style). */
     val greyedSlots: Set<Int> = emptySet(),
     val seed: Int = 1,
+    /** Varies only the score digits and particle effects (not the board or tray). */
+    val effectsSeed: Int = 0,
 )
 
 /** Draws a block-puzzle-like portrait screenshot. Only used to produce test fixtures. */
@@ -90,7 +92,7 @@ object ScreenRenderer {
         val g = img.createGraphics()
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-        val rnd = Random(scene.seed)
+        val rnd = Random(scene.seed * 31 + scene.effectsSeed)
         val t = scene.theme
 
         // Background gradient.

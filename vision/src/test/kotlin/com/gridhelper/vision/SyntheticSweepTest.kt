@@ -89,5 +89,32 @@ class SyntheticSweepTest {
         val after = scene.copy(board = scene.board or (1L shl freeCell), tray = listOf(null, null, null))
         val c = FrameSignature.of(Fixtures.toPixelSource(ScreenRenderer.render(after)))
         assertTrue("differences=${a.differences(c)}", !a.isSameAs(c))
+
+        // A band restricted to board + tray ignores changes in the score area above the board.
+        val analysis = FrameAnalyzer().analyze(Fixtures.toPixelSource(ScreenRenderer.render(scene)))
+        val top = analysis.board!!.outer.top / 2400f - 0.01f
+        val bottom = analysis.tray!!.area.bottom / 2400f
+        val otherScore = scene.copy(effectsSeed = 7) // different score digits and effects only
+        val d = FrameSignature.of(Fixtures.toPixelSource(ScreenRenderer.render(otherScore)), top, bottom)
+        val e = FrameSignature.of(Fixtures.toPixelSource(ScreenRenderer.render(scene)), top, bottom)
+        assertTrue(!a.isSameAs(FrameSignature.of(Fixtures.toPixelSource(ScreenRenderer.render(otherScore)))))
+        assertTrue("differences=${d.differences(e)}", d.isSameAs(e))
+    }
+
+    @Test
+    fun byteBufferSourceMatchesIntArraySource() {
+        val w = 7
+        val h = 5
+        val rowStride = w * 4 + 12 // padded rows like ImageReader
+        val buf = java.nio.ByteBuffer.allocate(rowStride * h)
+        val argb = IntArray(w * h) { i -> (0xFF shl 24) or (i * 2654435761L).toInt() and 0xFFFFFF or (0xFF shl 24) }
+        for (y in 0 until h) for (x in 0 until w) {
+            val c = argb[y * w + x]
+            val o = y * rowStride + x * 4
+            buf.put(o, (c shr 16).toByte()); buf.put(o + 1, (c shr 8).toByte()); buf.put(o + 2, c.toByte()); buf.put(o + 3, 0xFF.toByte())
+        }
+        val a = ByteBufferPixelSource(buf, w, h, rowStride)
+        val b = IntArrayPixelSource(w, h, argb)
+        for (y in 0 until h) for (x in 0 until w) assertEquals(b.rgb(x, y), a.rgb(x, y))
     }
 }

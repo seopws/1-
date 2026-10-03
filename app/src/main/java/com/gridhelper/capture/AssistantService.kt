@@ -183,7 +183,17 @@ class AssistantService : Service() {
             return
         }
 
-        capturer = ScreenCapturer(mp, display.width, display.height, display.densityDpi, ::onFrame).also { it.start() }
+        val cap = ScreenCapturer(mp, display.width, display.height, display.densityDpi, ::onFrame)
+        capturer = cap
+        try {
+            cap.start()
+        } catch (e: RuntimeException) {
+            // e.g. SecurityException when the consent token was already used / revoked.
+            Log.e(TAG, "createVirtualDisplay failed", e)
+            AssistantState.post("화면 캡처를 시작할 수 없습니다. 다시 시작해 주세요.")
+            shutdown()
+            return
+        }
         running = true
         registerScreenReceiver()
         screenOff = !getSystemService(PowerManager::class.java).isInteractive

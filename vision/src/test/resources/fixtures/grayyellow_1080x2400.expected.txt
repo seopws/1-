@@ -1,0 +1,14 @@
+// GridHelper fixture expectation: '#' filled, '.' empty; tray: shape key or '-' = empty slot
+board
+#..###.#
+.#...#.#
+#..###..
+##.##.#.
+...##..#
+#...###.
+##..####
+.....#..
+tray
+###/.#.
+#/#/#/#
+##
